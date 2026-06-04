@@ -39,6 +39,7 @@ linux-setup update
 
 ```bash
 linux-setup list
+linux-setup status
 linux-setup install resume ai-menu
 linux-setup update
 linux-setup uninstall
@@ -61,6 +62,21 @@ Managed files carry version metadata in the file itself:
 Installed files are also tracked by SHA-256 in `~/.local/state/linux-setup/installed.tsv`. Updates replace a file automatically only when it still matches the last installed hash.
 
 If a local file has been edited, `linux-setup` writes the new version beside it as `<path>.new` unless `--force` is used.
+
+## State Detection
+
+`linux-setup status` classifies every managed module before making changes:
+
+| state | meaning |
+|---|---|
+| `uninstalled` | target file is missing |
+| `current` | local version matches remote version |
+| `outdated` | remote version is newer than local version |
+| `modified` | local file hash differs from the last installed hash |
+| `ahead` | local version is newer than remote version |
+| `foreign` | target exists but is not the expected managed module |
+
+The same command reports shell setup as `managed`, `configured`, or `missing` for PATH and AI autolaunch blocks.
 
 ## Modules
 

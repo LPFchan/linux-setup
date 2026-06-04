@@ -93,14 +93,32 @@ if [[ -f "$HOME/.bashrc" ]]; then
     . "$HOME/.bashrc"
 fi'
 
-    has_path_setup "$HOME/.zshenv" || append_block_once "$HOME/.zshenv" path "$path_block"
-    has_ai_autolaunch "$HOME/.zshrc" || prepend_block_once "$HOME/.zshrc" zsh-ai "$zsh_ai_block"
+    if has_path_setup "$HOME/.zshenv"; then
+        echo "Current shell path -> $HOME/.zshenv"
+    else
+        append_block_once "$HOME/.zshenv" path "$path_block"
+    fi
+    if has_ai_autolaunch "$HOME/.zshrc"; then
+        echo "Current zsh ai autolaunch -> $HOME/.zshrc"
+    else
+        prepend_block_once "$HOME/.zshrc" zsh-ai "$zsh_ai_block"
+    fi
 
-    has_path_setup "$HOME/.bashrc" || append_block_once "$HOME/.bashrc" path "$path_block"
-    has_ai_autolaunch "$HOME/.bashrc" || append_block_once "$HOME/.bashrc" bash-ai "$bash_ai_block"
+    if has_path_setup "$HOME/.bashrc"; then
+        echo "Current shell path -> $HOME/.bashrc"
+    else
+        append_block_once "$HOME/.bashrc" path "$path_block"
+    fi
+    if has_ai_autolaunch "$HOME/.bashrc"; then
+        echo "Current bash ai autolaunch -> $HOME/.bashrc"
+    else
+        append_block_once "$HOME/.bashrc" bash-ai "$bash_ai_block"
+    fi
 
     if [[ ! -f "$HOME/.bash_profile" && ! -f "$HOME/.bash_login" && ! -f "$HOME/.profile" ]]; then
         append_block_once "$HOME/.bash_profile" bash-profile "$bash_profile_block"
+    else
+        echo "Current bash login profile -> existing profile"
     fi
 }
 

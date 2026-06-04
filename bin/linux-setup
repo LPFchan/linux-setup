@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # linux-setup-module: linux-setup
-# linux-setup-version: 2026.06.05.4
+# linux-setup-version: 2026.06.05.5
 # linux-setup-source: bin/linux-setup
 set -euo pipefail
 
@@ -18,6 +18,7 @@ Usage: linux-setup [--force] <command> [module...]
 
 Commands:
   list                 List available modules
+  status [module...]   Show installed/current/outdated/modified state
   install [module...]  Install missing or newer modules
   update [module...]   Install missing or newer modules
   uninstall [module...] Remove managed files and shell config blocks
@@ -92,6 +93,34 @@ module_for() {
             '# linux-setup-module: '*) printf '%s\n' "${line#'# linux-setup-module: '}"; return 0 ;;
         esac
     done < "$file"
+}
+
+has_path_setup() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    grep -Eq '(^|["=:])\$HOME/\.local/bin|(^|["=:])~/\.local/bin|(^|["=:])/.*/\.local/bin' "$file"
+}
+
+has_ai_autolaunch() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    grep -Eq 'ai-start-menu' "$file" \
+        && grep -Eq 'AI_AUTO_LAUNCHED' "$file" \
+        && grep -Eq '(^|[^[:alnum:]_])ai([[:space:]]*$|[[:space:]]|;|&&|\|\|)' "$file"
+}
+
+has_managed_block() {
+    local file="$1" label="$2"
+    [[ -f "$file" ]] || return 1
+    grep -Fq "# >>> linux-setup:$label >>>" "$file"
+}
+
+fetch_payload() {
+    local source="$1" payload="$2"
+    if ! curl -fsSL "$BASE_URL/$source" -o "$payload" \
+        || ! grep -q '^# linux-setup-module: ' "$payload"; then
+        curl -fsSL "$FALLBACK_URL/$source" -o "$payload"
+    fi
 }
 
 version_gt() {
@@ -210,10 +239,7 @@ install_one() {
 
     payload=$(mktemp)
 
-    if ! curl -fsSL "$BASE_URL/$source" -o "$payload" \
-        || ! grep -q '^# linux-setup-module: ' "$payload"; then
-        curl -fsSL "$FALLBACK_URL/$source" -o "$payload"
-    fi
+    fetch_payload "$source" "$payload"
     remote_version=$(version_for "$payload" || true)
     remote_module=$(module_for "$payload" || true)
 
@@ -241,7 +267,7 @@ install_one() {
                 return 0
             fi
         fi
-        echo "Current $module $local_version"
+        echo "Current $module $local_version -> $target"
         rm -f "$payload"
         return 0
     fi
@@ -273,12 +299,99 @@ install_one() {
     rm -f "$payload"
 }
 
+status_one() {
+    local module="$1" target_spec="$2" mode="$3" source="$4"
+    local target payload remote_version local_version local_module old_hash current_hash state extra
+    target=$(expand_path "$target_spec")
+    payload=$(mktemp)
+    fetch_payload "$source" "$payload"
+    remote_version=$(version_for "$payload" || true)
+    rm -f "$payload"
+
+    if [[ ! -f "$target" ]]; then
+        printf '%-14s %-12s remote=%s target=%s\n' "$module" "uninstalled" "${remote_version:-unknown}" "$target"
+        return 0
+    fi
+
+    local_module=$(module_for "$target" || true)
+    local_version=$(version_for "$target" || true)
+    old_hash=$(installed_hash_for "$target" || true)
+
+    if [[ "$local_module" != "$module" ]]; then
+        printf '%-14s %-12s target=%s\n' "$module" "foreign" "$target"
+        return 0
+    fi
+
+    state="current"
+    extra="local=${local_version:-unknown} remote=${remote_version:-unknown}"
+
+    if [[ -n "$old_hash" ]]; then
+        current_hash=$(sha256 "$target")
+        if [[ "$current_hash" != "$old_hash" ]]; then
+            state="modified"
+        fi
+    else
+        extra="$extra untracked-hash"
+    fi
+
+    if [[ "$state" != "modified" ]]; then
+        if version_gt "$remote_version" "$local_version"; then
+            state="outdated"
+        elif version_gt "$local_version" "$remote_version"; then
+            state="ahead"
+        fi
+    fi
+
+    printf '%-14s %-12s %s target=%s\n' "$module" "$state" "$extra" "$target"
+}
+
 cmd_list() {
     fetch_manifest
     while IFS=$'\t' read -r module target mode source; do
         [[ -z "${module:-}" || "$module" == \#* ]] && continue
         printf '%-14s %s\n' "$module" "$target"
     done < "$MANIFEST_FILE"
+}
+
+cmd_status() {
+    fetch_manifest
+    local found=0
+    while IFS=$'\t' read -r module target mode source; do
+        [[ -z "${module:-}" || "$module" == \#* ]] && continue
+        if module_selected "$module" "$@"; then
+            found=1
+            status_one "$module" "$target" "$mode" "$source"
+        fi
+    done < "$MANIFEST_FILE"
+    ((found == 1)) || { echo "No matching modules." >&2; exit 1; }
+
+    if (($# == 0)); then
+        echo
+        shell_status
+    fi
+}
+
+shell_status() {
+    shell_status_one "$HOME/.zshenv" path has_path_setup
+    shell_status_one "$HOME/.zshrc" zsh-ai has_ai_autolaunch
+    shell_status_one "$HOME/.bashrc" path has_path_setup
+    shell_status_one "$HOME/.bashrc" bash-ai has_ai_autolaunch
+    if [[ -f "$HOME/.bash_profile" || -f "$HOME/.bash_login" || -f "$HOME/.profile" ]]; then
+        printf '%-14s %-12s target=%s\n' "bash-profile" "existing" "login profile present"
+    else
+        printf '%-14s %-12s target=%s\n' "bash-profile" "missing" "$HOME/.bash_profile"
+    fi
+}
+
+shell_status_one() {
+    local file="$1" label="$2" detector="$3" state="missing"
+    if "$detector" "$file"; then
+        state="configured"
+    fi
+    if has_managed_block "$file" "$label"; then
+        state="managed"
+    fi
+    printf '%-14s %-12s target=%s\n' "$label" "$state" "$file"
 }
 
 cmd_install() {
@@ -322,10 +435,7 @@ cmd_diff() {
         found=1
         local_path=$(expand_path "$target")
         payload=$(mktemp)
-        if ! curl -fsSL "$BASE_URL/$source" -o "$payload" \
-            || ! grep -q '^# linux-setup-module: ' "$payload"; then
-            curl -fsSL "$FALLBACK_URL/$source" -o "$payload"
-        fi
+        fetch_payload "$source" "$payload"
         if [[ -f "$local_path" ]]; then
             diff -u "$local_path" "$payload" || true
         else
@@ -366,6 +476,7 @@ shift || true
 
 case "$cmd" in
     list) cmd_list "$@" ;;
+    status) cmd_status "$@" ;;
     install|update) cmd_install "$@" ;;
     uninstall) cmd_uninstall "$@" ;;
     diff) cmd_diff "$@" ;;
