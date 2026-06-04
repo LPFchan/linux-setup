@@ -7,6 +7,7 @@
   <meta name="description" content="Install linux-setup, resume, and ai-menu with one command.">
   <meta property="og:title" content="linux-setup">
   <meta property="og:description" content="Install linux-setup, resume, and ai-menu with one command.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css">
   <style>
     :root {
       color-scheme: dark;
@@ -61,81 +62,21 @@
       width: min(620px, 100%);
       border: 1px solid var(--line);
       background: var(--panel);
-      font-family: var(--mono);
+      padding: 8px;
       text-align: left;
+      cursor: text;
     }
 
-    .screen {
-      padding: 14px;
+    #terminal {
+      height: 238px;
     }
 
-    .screen-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding-bottom: 10px;
-      color: var(--muted);
-      font-size: 11px;
-      letter-spacing: 0.04em;
-      border-bottom: 1px solid var(--line);
+    .xterm {
+      padding: 0;
     }
 
-    .query {
-      margin-top: 12px;
-      color: var(--fg);
-      font-size: 13px;
-    }
-
-    .query span { color: var(--hot); }
-
-    .rows {
-      display: grid;
-      gap: 2px;
-      margin-top: 10px;
-    }
-
-    .row {
-      display: grid;
-      grid-template-columns: 18px minmax(0, 1fr);
-      gap: 8px;
-      width: 100%;
-      padding: 8px 6px;
-      border: 0;
-      color: var(--muted);
-      background: transparent;
-      font: inherit;
-      font-size: 13px;
-      line-height: 1.25;
-      text-align: left;
-      cursor: pointer;
-      transition: color 120ms ease, background 120ms ease;
-    }
-
-    .row[aria-selected="true"] {
-      color: var(--bg);
-      background: var(--hot);
-    }
-
-    .row small {
-      display: block;
-      margin-top: 3px;
-      color: inherit;
-      opacity: 0.68;
-      font-size: 11px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .screen-foot {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      margin-top: 12px;
-      padding-top: 10px;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 11px;
+    .xterm .xterm-viewport {
+      background: transparent !important;
     }
 
     .command {
@@ -199,9 +140,7 @@
     @media (max-width: 560px) {
       .command { grid-template-columns: 1fr; }
       #copy-button { min-height: 56px; border-left: 0; border-top: 1px solid var(--line); }
-      .screen { padding: 12px; }
-      .screen-head, .screen-foot { font-size: 10px; }
-      .row { font-size: 12px; }
+      #terminal { height: 226px; }
     }
   </style>
 </head>
@@ -209,7 +148,7 @@
   <main>
     <h1>linux-setup</h1>
     <section class="demo" aria-label="Interactive ai-menu and resume demo">
-      <div class="screen" id="demo-screen" tabindex="0"></div>
+      <div id="terminal"></div>
     </section>
     <div class="command" role="group" aria-label="Install command">
       <code id="install-command">curl -fsSL https://setup.lost.plus/install.sh | bash</code>
@@ -220,93 +159,339 @@
 
   <footer><a href="https://github.com/LPFchan/linux-setup">github</a></footer>
 
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js"></script>
   <script>
     const button = document.getElementById('copy-button');
     const command = document.getElementById('install-command').textContent;
-    const screen = document.getElementById('demo-screen');
-    const demoState = { mode: 'ai', selected: { ai: 4, resume: 0 } };
-    const demos = {
+    const terminalElement = document.getElementById('terminal');
+    const demoState = {
+      mode: 'ai',
+      selected: { ai: 0, resume: 0 },
+      query: { ai: '', resume: '' },
+      status: '',
+      loaded: false
+    };
+    let demos = {
       ai: {
-        title: 'current machine: grimoire',
+        title: 'loading ai-menu source...',
         prompt: '▌ ',
-        footer: 'ENTER launch · ↑↓ select · resume opens picker',
+        footer: 'fetching /files/ai-start-menu',
         rows: [
-          ['claude', 'start Claude Code in this shell'],
-          ['codex', 'launch npm-prefix Codex binary'],
-          ['opencode', 'start OpenCode with Exa enabled'],
-          ['grimoire', 'ssh host from ~/.ssh/config'],
-          ['resume', 'open previous AI session picker'],
-          ['neither', 'return to shell']
+          { label: 'loading', detail: 'waiting for deployed script source', action: 'wait' }
         ]
       },
       resume: {
-        title: 'resume >',
+        title: 'loading resume source...',
         prompt: 'resume > ',
-        footer: 'ENTER resume · ESC/Ctrl-C back to ai-menu',
+        footer: 'fetching /files/resume',
         rows: [
-          ['06/04 17:29  opencode  ~/linux-setup', 'Polish minimal landing page'],
-          ['06/04 17:16  claude    ~/linux-setup', 'Minimize landing page and auto-install modules'],
-          ['06/04 16:57  codex     ~/vaultwarden-mcp', 'Cloudflare DNS record debugging'],
-          ['06/03 22:04  forge     ~/grimoire', 'cgroup monitor cleanup'],
-          ['06/03 14:12  claude    ~', 'Shell startup guard review']
+          { label: 'loading', detail: 'waiting for deployed script source', action: 'wait' }
         ]
       }
     };
 
-    function renderDemo() {
-      const data = demos[demoState.mode];
-      const selected = demoState.selected[demoState.mode];
-      screen.innerHTML = `
-        <div class="screen-head"><span>${data.title}</span><span>${selected + 1}/${data.rows.length}</span></div>
-        <div class="query"><span>${data.prompt}</span>${demoState.mode === 'ai' ? 'pick tool or host' : 'previous conversations'}</div>
-        <div class="rows">
-          ${data.rows.map((row, index) => `
-            <button class="row" type="button" aria-selected="${index === selected}" data-index="${index}">
-              <span>${index === selected ? '▌' : ''}</span>
-              <span>${row[0]}<small>${row[1]}</small></span>
-            </button>
-          `).join('')}
-        </div>
-        <div class="screen-foot"><span>${data.footer}</span><span>${demoState.mode}</span></div>
-      `;
-      screen.querySelectorAll('.row').forEach((row) => {
-        row.addEventListener('click', () => {
-          demoState.selected[demoState.mode] = Number(row.dataset.index);
-          if (demoState.mode === 'ai' && demos.ai.rows[demoState.selected.ai][0] === 'resume') {
-            demoState.mode = 'resume';
-          }
-          renderDemo();
-        });
-      });
+    const toolDescriptions = {
+      claude: 'executes the claude case branch',
+      codex: 'executes the npm-prefix-aware codex branch',
+      opencode: 'executes OPENCODE_ENABLE_EXA=1 opencode',
+      resume: 'calls the managed resume script',
+      neither: 'no-op; returns to shell',
+      'ssh-host': 'generated from Host entries in ~/.ssh/config'
+    };
+
+    function meta(source, key) {
+      const match = source.match(new RegExp(`^# linux-setup-${key}:\\s*(.+)$`, 'm'));
+      return match ? match[1].trim() : 'unknown';
     }
 
-    screen.addEventListener('keydown', (event) => {
-      const rows = demos[demoState.mode].rows;
+    function caseBody(source, label) {
+      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`${escaped}\\)([\\s\\S]*?)\\n\\s*;;`, 'g');
+      const bodies = Array.from(source.matchAll(pattern)).map((match) => match[1].trim().replace(/\s+/g, ' '));
+      return bodies.find((body) => /\bexec\b/.test(body)) || bodies[0] || '';
+    }
+
+    function compactCommand(text) {
+      return text
+        .replace(/; then/g, '; then')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+    }
+
+    function parseAiMenu(source) {
+      const rows = [];
+      const optionsMatch = source.match(/options=\(([^)]*)\)/);
+      if (optionsMatch) {
+        optionsMatch[1].trim().split(/\s+/).filter(Boolean).forEach((name) => {
+          rows.push({
+            label: name,
+            detail: compactCommand(caseBody(source, name)) || toolDescriptions[name] || 'listed in options=(...)',
+            action: name
+          });
+        });
+      }
+      if (/ssh_hosts=/.test(source)) {
+        rows.push({ label: 'grimoire', detail: toolDescriptions['ssh-host'], action: 'ssh' });
+      }
+      if (/options\+=\(resume neither\)/.test(source)) {
+        rows.push({ label: 'resume', detail: compactCommand(caseBody(source, 'resume')) || toolDescriptions.resume, action: 'resume' });
+        rows.push({ label: 'neither', detail: compactCommand(caseBody(source, 'neither|""')) || toolDescriptions.neither, action: 'neither' });
+      }
+      return rows.length ? rows : [{ label: 'source loaded', detail: 'no menu entries parsed', action: 'none' }];
+    }
+
+    function parseResume(source) {
+      const rows = [];
+      const tools = {
+        cc: { label: 'claude', store: source.match(/CLAUDE_DIR="([^"]+)"/)?.[1] || '~/.claude/projects' },
+        cx: { label: 'codex', store: source.match(/CODEX_DIR="([^"]+)"/)?.[1] || '~/.codex/sessions' },
+        oc: { label: 'opencode', store: source.match(/OC_DB="([^"]+)"/)?.[1] || '~/.local/share/opencode/opencode.db' },
+        fg: { label: 'forge', store: source.match(/FG_DB="([^"]+)"/)?.[1] || '~/.forge/.forge.db' }
+      };
+
+      for (const key of Object.keys(tools)) {
+        if (source.includes(`${key}) label=`) || source.includes(`${key}) exec `)) {
+          rows.push({
+            label: tools[key].label,
+            detail: `${tools[key].store} -> ${compactCommand(caseBody(source, key))}`,
+            action: key
+          });
+        }
+      }
+
+      if (/parent_id IS NULL/.test(source)) rows.push({ label: 'filter', detail: 'OpenCode subagents hidden via parent_id IS NULL', action: 'info' });
+      if (/CodexBar/.test(source)) rows.push({ label: 'filter', detail: 'CodexBar probe cwd excluded before display', action: 'info' });
+      return rows.length ? rows : [{ label: 'source loaded', detail: 'no resume backends parsed', action: 'none' }];
+    }
+
+    async function fetchSource(path) {
+      const response = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`${path}: ${response.status}`);
+      return response.text();
+    }
+
+    async function loadDemoSources() {
+      try {
+        const [aiSource, resumeSource] = await Promise.all([
+          fetchSource('/files/ai-start-menu'),
+          fetchSource('/files/resume')
+        ]);
+        demos = {
+          ai: {
+            title: `ai-menu ${meta(aiSource, 'version')}`,
+            prompt: '▌ ',
+            footer: `live from ${meta(aiSource, 'source')} · ENTER resume opens picker`,
+            rows: parseAiMenu(aiSource)
+          },
+          resume: {
+            title: `resume ${meta(resumeSource, 'version')}`,
+            prompt: 'resume > ',
+            footer: `live from ${meta(resumeSource, 'source')} · ESC/Ctrl-C back`,
+            rows: parseResume(resumeSource)
+          }
+        };
+        demoState.loaded = true;
+        const fixedResumeIndex = demos.ai.rows.findIndex((row) => row.label === 'resume');
+        demoState.selected.ai = fixedResumeIndex >= 0 ? fixedResumeIndex : 0;
+        demoState.selected.resume = 0;
+        demoState.status = 'live source loaded';
+      } catch (error) {
+        demos.ai.title = 'source fetch failed';
+        demos.ai.footer = String(error.message || error);
+      }
+      renderDemo();
+    }
+
+    const ansi = {
+      reset: '\x1b[0m',
+      dim: '\x1b[38;2;119;119;114m',
+      fg: '\x1b[38;2;241;241;238m',
+      hot: '\x1b[38;2;200;255;61m',
+      selected: '\x1b[30;48;2;200;255;61m'
+    };
+
+    const term = window.Terminal ? new Terminal({
+      cols: terminalCols(),
+      rows: 12,
+      cursorBlink: true,
+      cursorStyle: 'block',
+      fontFamily: 'SF Mono, JetBrains Mono, IBM Plex Mono, Consolas, monospace',
+      fontSize: 13,
+      lineHeight: 1.18,
+      theme: {
+        background: '#10100f',
+        foreground: '#f1f1ee',
+        cursor: '#c8ff3d',
+        selectionBackground: '#c8ff3d',
+        selectionForeground: '#050505',
+        black: '#050505',
+        brightBlack: '#777772',
+        green: '#c8ff3d',
+        brightGreen: '#c8ff3d'
+      },
+      convertEol: true,
+      disableStdin: false,
+      scrollback: 0
+    }) : null;
+
+    function terminalCols() {
+      return Math.max(46, Math.min(74, Math.floor((terminalElement.clientWidth - 16) / 8)));
+    }
+
+    function clip(text, width) {
+      if (text.length <= width) return text.padEnd(width, ' ');
+      return text.slice(0, Math.max(0, width - 1)) + '…';
+    }
+
+    function rowText(row) {
+      return demoState.mode === 'ai' ? `${row.label}  ${row.detail}` : `${row.label}  ${row.detail}`;
+    }
+
+    function visibleRows() {
+      const data = demos[demoState.mode];
+      const query = demoState.query[demoState.mode].toLowerCase();
+      if (!query) return data.rows.map((row, index) => ({ row, index }));
+      return data.rows
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => `${row.label} ${row.detail}`.toLowerCase().includes(query));
+    }
+
+    function selectedVisibleIndex(rows) {
+      const selected = demoState.selected[demoState.mode];
+      const index = rows.findIndex((entry) => entry.index === selected);
+      return index >= 0 ? index : 0;
+    }
+
+    function renderDemo() {
+      const data = demos[demoState.mode];
+      const rows = visibleRows();
+      const visibleSelected = selectedVisibleIndex(rows);
+      if (rows.length && rows[visibleSelected].index !== demoState.selected[demoState.mode]) {
+        demoState.selected[demoState.mode] = rows[visibleSelected].index;
+      }
+      const cols = term ? term.cols : terminalCols();
+      const inner = cols - 2;
+      const topLabel = demoState.mode === 'ai' ? ` ${data.title} ` : ' resume sessions ';
+      const top = '┌' + topLabel + '─'.repeat(Math.max(0, inner - topLabel.length)) + '┐';
+      const bottom = '└' + '─'.repeat(inner) + '┘';
+      const prompt = demoState.mode === 'ai'
+        ? `▌ ${demoState.query.ai || 'pick tool or host'}`
+        : `resume > ${demoState.query.resume || 'previous conversations'}`;
+      const footer = demoState.mode === 'ai'
+        ? 'type filters · ENTER dispatches parsed case branch'
+        : 'type filters · ENTER shows parsed exec · ESC/Ctrl-C back';
+
+      const lines = [
+        `${ansi.dim}${top}${ansi.reset}`,
+        `${ansi.dim}│${ansi.reset}${clip(prompt, inner)}${ansi.dim}│${ansi.reset}`,
+        `${ansi.dim}├${'─'.repeat(inner)}┤${ansi.reset}`
+      ];
+
+      rows.forEach(({ row, index }) => {
+        const isSelected = index === demoState.selected[demoState.mode];
+        const prefix = isSelected ? '▌ ' : '  ';
+        const text = clip(prefix + rowText(row), inner);
+        if (isSelected) {
+          lines.push(`${ansi.dim}│${ansi.reset}${ansi.selected}${text}${ansi.reset}${ansi.dim}│${ansi.reset}`);
+        } else {
+          lines.push(`${ansi.dim}│${ansi.reset}${ansi.fg}${text}${ansi.reset}${ansi.dim}│${ansi.reset}`);
+        }
+      });
+
+      while (lines.length < 10) {
+        lines.push(`${ansi.dim}│${ansi.reset}${' '.repeat(inner)}${ansi.dim}│${ansi.reset}`);
+      }
+
+      lines.push(`${ansi.dim}├${'─'.repeat(inner)}┤${ansi.reset}`);
+      lines.push(`${ansi.dim}│${ansi.reset}${ansi.hot}${clip(demoState.status || footer, inner)}${ansi.reset}${ansi.dim}│${ansi.reset}`);
+      lines.push(`${ansi.dim}${bottom}${ansi.reset}`);
+
+      if (!term) {
+        terminalElement.innerHTML = `<pre>${lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '')}</pre>`;
+        return;
+      }
+
+      term.write('\x1b[2J\x1b[H' + lines.join('\r\n'));
+    }
+
+    function handleDemoKey(event) {
+      const rows = visibleRows();
+      if (!rows.length) return;
+      const currentVisible = selectedVisibleIndex(rows);
       if (event.key === 'ArrowDown' || event.key === 'j') {
         event.preventDefault();
-        demoState.selected[demoState.mode] = (demoState.selected[demoState.mode] + 1) % rows.length;
+        demoState.selected[demoState.mode] = rows[(currentVisible + 1) % rows.length].index;
+        demoState.status = '';
         renderDemo();
       }
       if (event.key === 'ArrowUp' || event.key === 'k') {
         event.preventDefault();
-        demoState.selected[demoState.mode] = (demoState.selected[demoState.mode] - 1 + rows.length) % rows.length;
+        demoState.selected[demoState.mode] = rows[(currentVisible - 1 + rows.length) % rows.length].index;
+        demoState.status = '';
         renderDemo();
       }
-      if (event.key === 'Enter' && demoState.mode === 'ai') {
+      if (event.key === 'Backspace') {
         event.preventDefault();
-        if (demos.ai.rows[demoState.selected.ai][0] === 'resume') {
+        demoState.query[demoState.mode] = demoState.query[demoState.mode].slice(0, -1);
+        demoState.status = '';
+        renderDemo();
+      }
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        demoState.query[demoState.mode] += event.key;
+        demoState.status = '';
+        renderDemo();
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const selectedRow = demos[demoState.mode].rows[demoState.selected[demoState.mode]];
+        if (demoState.mode === 'ai' && selectedRow?.action === 'resume') {
           demoState.mode = 'resume';
+          demoState.query.resume = '';
+          demoState.status = 'exec resume';
+          renderDemo();
+          return;
+        }
+        if (demoState.mode === 'ai') {
+          demoState.status = selectedRow?.action === 'neither'
+            ? 'returning to shell'
+            : `$ ${selectedRow?.detail || selectedRow?.label}`;
+          renderDemo();
+          return;
+        }
+        if (demoState.mode === 'resume') {
+          demoState.status = selectedRow?.detail || 'resume selected';
           renderDemo();
         }
       }
       if (demoState.mode === 'resume' && (event.key === 'Escape' || (event.ctrlKey && event.key.toLowerCase() === 'c'))) {
         event.preventDefault();
         demoState.mode = 'ai';
+        demoState.query.resume = '';
+        demoState.status = 'cancelled resume; back to ai-menu';
         renderDemo();
       }
-    });
+    }
 
-    renderDemo();
+    if (term) {
+      term.open(terminalElement);
+      term.onKey(({ domEvent }) => handleDemoKey(domEvent));
+      terminalElement.addEventListener('click', () => term.focus());
+      window.addEventListener('resize', () => {
+        term.resize(terminalCols(), 12);
+        renderDemo();
+      });
+      renderDemo();
+      setTimeout(() => term.focus(), 50);
+    } else {
+      renderDemo();
+      terminalElement.tabIndex = 0;
+      terminalElement.addEventListener('keydown', handleDemoKey);
+    }
+
+    loadDemoSources();
+    setInterval(loadDemoSources, 60000);
 
     function fallbackCopy(text) {
       const textarea = document.createElement('textarea');
