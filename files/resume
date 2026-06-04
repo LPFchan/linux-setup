@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# resume - interactively pick and resume a Claude Code, Codex, OpenCode, or ForgeCode session
+
+set -euo pipefail
+
+CLAUDE_DIR="$HOME/.claude/projects"
+CODEX_DIR="$HOME/.codex/sessions"
+OC_DB="$HOME/.local/share/opencode/opencode.db"
+FG_DB="$HOME/.forge/.forge.db"
+MAX_SESSIONS=100
+
+case "$(uname -s)" in
+    Darwin)
+        STAT_CMD=(stat -f %m)
+        DATE_CMD=(date -r)
+        ;;
+    *)
+        STAT_CMD=(stat -c %Y)
+        DATE_CMD=(date -d "@")
+        ;;
+esac
+
+_cc_first_msg() {
+    grep -m5 '"role":"user"' "$1" 2>/dev/null \
+    | jq -r 'select(.message.content != null)
+             | .message.content
+             | if type == "array" then (.[0].text // "") else . end
+             | select(. != null and (startswith("<") | not))
+             | .' 2>/dev/null \
+    | head -1
+}
+
+_cx_first_msg() {
+    grep '"role":"user"' "$1" 2>/dev/null \
+    | jq -r 'select(.type == "response_item")
+             | .payload.content[]
+             | select(.type == "input_text")
+             | .text
+             | select(startswith("#") or startswith("<") or (length > 300) | not)' 2>/dev/null \
+    | head -1
+}
+
+_cc_proj_path() {
+    local proj="$1"
+    local rest="${proj#-}"
+    echo "/${rest//-//}"
+}
+
+collect_sessions() {
+    if [[ -d "$CLAUDE_DIR" ]]; then
+        ls -t "$CLAUDE_DIR"/*/*.jsonl 2>/dev/null | head -n "$MAX_SESSIONS" | while read -r f; do
+            id=$(basename "$f" .jsonl)
+            [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || continue
+            mtime=$("${STAT_CMD[@]}" "$f" 2>/dev/null) || continue
+            proj=$(basename "$(dirname "$f")")
+            cwd=$(_cc_proj_path "$proj")
+            [[ "$cwd" == *"CodexBar"* ]] && continue
+            msg=$(_cc_first_msg "$f")
+            echo "$mtime|cc|$id|$cwd|${msg:-}"
+        done
+    fi
+
+    if [[ -d "$CODEX_DIR" ]]; then
+        find "$CODEX_DIR" -name "rollout-*.jsonl" 2>/dev/null \
+        | while read -r f; do
+            id=$(basename "$f" .jsonl | sed 's/^rollout-[0-9T-]\{19\}-//')
+            mtime=$("${STAT_CMD[@]}" "$f" 2>/dev/null) || continue
+            meta=$(head -1 "$f" 2>/dev/null)
+            src=$(echo "$meta" | jq -r '.payload.thread_source // ""' 2>/dev/null)
+            [[ "$src" == "subagent" ]] && continue
+            cwd=$(echo "$meta" | jq -r '.payload.cwd // ""' 2>/dev/null || echo "")
+            msg=$(_cx_first_msg "$f")
+            echo "$mtime|cx|$id|$cwd|${msg:-}"
+        done
+    fi
+
+    if [[ -f "$OC_DB" ]]; then
+        python3 - "$OC_DB" "$HOME" << 'PYEOF'
+import sqlite3, sys
+db, home = sys.argv[1], sys.argv[2]
+conn = sqlite3.connect(db)
+for sid, title, directory, ts_ms in conn.execute(
+    "SELECT id, title, directory, time_updated FROM session "
+    "WHERE parent_id IS NULL ORDER BY time_updated DESC LIMIT 100"
+):
+    ts = ts_ms // 1000
+    cwd = directory or home
+    print(f"{ts}|oc|{sid}|{cwd}|{title or ''}")
+conn.close()
+PYEOF
+    fi
+
+    if [[ -f "$FG_DB" ]]; then
+        python3 - "$FG_DB" "$HOME" << 'PYEOF'
+import sqlite3, sys, json, re
+from datetime import datetime, timezone
+db, home = sys.argv[1], sys.argv[2]
+conn = sqlite3.connect(db)
+for cid, title, updated_at, context in conn.execute(
+    "SELECT conversation_id, title, updated_at, context FROM conversations ORDER BY updated_at DESC LIMIT 100"
+):
+    try:
+        ts = int(datetime.strptime(updated_at.split('.')[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+    except Exception:
+        ts = 0
+    cwd, msg = None, title or ""
+    if context:
+        try:
+            for m in json.loads(context).get("messages", []):
+                text = m.get("message", {}).get("text", {})
+                content = text.get("content", "")
+                role = text.get("role", "")
+                if role == "System" and cwd is None and isinstance(content, str):
+                    match = re.search(r'<current_working_directory>(.*?)</current_working_directory>', content)
+                    if match:
+                        cwd = match.group(1)
+                if not msg and role == "User":
+                    if isinstance(content, list):
+                        content = next((c["text"] for c in content if isinstance(c, dict) and c.get("type") == "text"), "")
+                    if isinstance(content, str):
+                        task = re.search(r'<task>(.*?)</task>', content, re.DOTALL)
+                        msg = ' '.join((task.group(1) if task else re.sub(r'<[^>]+>', '', content)).split())
+        except Exception:
+            pass
+    cwd = cwd or home
+    print(f"{ts}|fg|{cid}|{cwd}|{msg}")
+conn.close()
+PYEOF
+    fi
+}
+
+sessions=$(collect_sessions | sort -rn | head -n "$MAX_SESSIONS")
+
+if [[ -z "$sessions" ]]; then
+    echo "No sessions found." >&2
+    exit 1
+fi
+
+format_for_fzf() {
+    while IFS='|' read -r ts tool id cwd msg; do
+        date_str=$("${DATE_CMD[@]}" "$ts" "+%m/%d %H:%M" 2>/dev/null || echo "??/?? ??:??")
+        case "$tool" in
+            cc) label="claude  " ;;
+            cx) label="codex   " ;;
+            oc) label="opencode" ;;
+            fg) label="forge   " ;;
+        esac
+        display_cwd=$(echo "$cwd" | sed "s|^$HOME|~|")
+        printf "%s  %s  %-22s  %s\t%s|%s|%s\n" \
+            "$date_str" "$label" "${display_cwd:0:22}" "$msg" "$tool" "$id" "$cwd"
+    done
+}
+
+selected=$(echo "$sessions" | format_for_fzf | \
+    fzf --no-sort \
+        --reverse \
+        --height=50% \
+        --min-height=8 \
+        --with-nth=1 \
+        --delimiter=$'\t' \
+        --prompt="resume > " \
+        --header="ENTER: resume   ESC: cancel")
+
+[[ -z "$selected" ]] && exit 0
+
+ref=$(printf '%s' "$selected" | cut -f2)
+tool=$(echo "$ref" | cut -d'|' -f1)
+id=$(echo "$ref" | cut -d'|' -f2)
+session_cwd=$(echo "$ref" | cut -d'|' -f3-)
+
+if [[ "$tool" != "cx" && -n "$session_cwd" && "$session_cwd" != "$PWD" ]]; then
+    if ! cd "$session_cwd" 2>/dev/null; then
+        echo "Warning: session dir '$session_cwd' not accessible, staying in $PWD" >&2
+    fi
+fi
+
+echo "Resuming $tool session $id..."
+
+case "$tool" in
+    cc) exec claude --resume "$id" ;;
+    cx) exec codex resume "$id" ;;
+    oc) exec opencode --session "$id" ;;
+    fg) exec forge --conversation-id "$id" ;;
+esac

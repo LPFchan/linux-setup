@@ -1,0 +1,4 @@
+# module	target	mode	source
+linux-setup	~/.local/bin/linux-setup	0755	bin/linux-setup
+resume	~/.local/bin/resume	0755	files/resume
+ai-menu	~/.bashrc.d/ai-start-menu	0644	files/ai-start-menu
