@@ -45,7 +45,7 @@
       margin: 0;
       font-size: clamp(42px, 10vw, 92px);
       line-height: 0.88;
-      letter-spacing: -0.08em;
+      letter-spacing: -0.045em;
       font-weight: 900;
     }
 
@@ -88,10 +88,32 @@
       font-size: 18px;
       font-weight: 900;
       cursor: pointer;
+      transition: filter 150ms ease, opacity 180ms ease;
     }
+
+    button.is-fading { opacity: 0; }
 
     button:active { filter: brightness(0.8); }
     button:focus-visible { outline: 2px solid var(--fg); outline-offset: -5px; }
+
+    footer {
+      position: fixed;
+      left: 24px;
+      right: 24px;
+      bottom: 20px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    footer a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    footer a:hover { color: var(--fg); }
 
     @media (max-width: 560px) {
       .command { grid-template-columns: 1fr; }
@@ -108,6 +130,8 @@
     </div>
     <p>installs linux-setup, resume, and ai-menu</p>
   </main>
+
+  <footer><a href="https://github.com/LPFchan/linux-setup">github</a></footer>
 
   <script>
     const button = document.getElementById('copy-button');
@@ -140,7 +164,13 @@
       if (!copied) copied = fallbackCopy(command);
 
       button.textContent = copied ? '✓' : 'copy?';
-      setTimeout(() => { button.textContent = 'copy'; }, 1200);
+      setTimeout(() => {
+        button.classList.add('is-fading');
+        setTimeout(() => {
+          button.textContent = 'copy';
+          button.classList.remove('is-fading');
+        }, 180);
+      }, 900);
     });
   </script>
 </body>
