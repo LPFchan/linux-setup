@@ -12,7 +12,18 @@ Install the updater CLI:
 curl -fsSL https://setup.lost.plus/install.sh | bash
 ```
 
-Install managed modules:
+The bare installer installs `linux-setup`, `resume`, and `ai-menu`, then idempotently wires shell startup for zsh and bash:
+
+```text
+~/.zshenv                  PATH only
+~/.zshrc                   interactive ai auto-launch
+~/.bashrc                  PATH + interactive ai auto-launch
+~/.bash_profile            only when no bash login profile exists
+```
+
+Managed blocks are marker-delimited as `linux-setup:<label>` and are safe to rerun.
+
+Install managed modules explicitly:
 
 ```bash
 linux-setup install resume ai-menu
@@ -30,6 +41,7 @@ linux-setup update
 linux-setup list
 linux-setup install resume ai-menu
 linux-setup update
+linux-setup uninstall
 linux-setup diff resume
 linux-setup doctor
 ```
@@ -57,6 +69,22 @@ If a local file has been edited, `linux-setup` writes the new version beside it 
 | `linux-setup` | `~/.local/bin/linux-setup` | `bin/linux-setup` |
 | `resume` | `~/.local/bin/resume` | `files/resume` |
 | `ai-menu` | `~/.bashrc.d/ai-start-menu` | `files/ai-start-menu` |
+
+## Uninstall
+
+Remove all managed files and marker-managed shell config blocks:
+
+```bash
+linux-setup uninstall
+```
+
+Remove selected modules only:
+
+```bash
+linux-setup uninstall resume ai-menu
+```
+
+If a managed file has local edits, uninstall keeps it unless `--force` is used.
 
 ## Design
 
