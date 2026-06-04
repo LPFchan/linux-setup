@@ -19,8 +19,9 @@ fi
 install -m 0755 "$tmp" "$TARGET"
 
 echo "Installed $TARGET"
-echo "Run: linux-setup install resume ai-menu"
 
 if (($# > 0)); then
     "$TARGET" "$@"
+else
+    "$TARGET" install resume ai-menu
 fi
