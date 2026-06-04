@@ -1,3 +1,7 @@
+# linux-setup-module: ai-menu
+# linux-setup-version: 2026.06.05.1
+# linux-setup-source: files/ai-start-menu
+
 ai() {
     local choice current_host
     local -a options ssh_hosts

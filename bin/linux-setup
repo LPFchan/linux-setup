@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# linux-setup-module: linux-setup
+# linux-setup-version: 2026.06.05.2
+# linux-setup-source: bin/linux-setup
 set -euo pipefail
 
-BASE_URL="${LINUX_SETUP_BASE_URL:-https://raw.githubusercontent.com/LPFchan/linux-setup/main}"
+BASE_URL="${LINUX_SETUP_BASE_URL:-https://setup.lost.plus}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/linux-setup"
 MANIFEST_URL="$BASE_URL/manifest.tsv"
 MANIFEST_FILE="$STATE_DIR/manifest.tsv"
@@ -14,8 +17,8 @@ Usage: linux-setup [--force] <command> [module...]
 
 Commands:
   list                 List available modules
-  install [module...]  Install or update modules
-  update [module...]   Alias for install
+  install [module...]  Install missing or newer modules
+  update [module...]   Install missing or newer modules
   diff [module...]     Show local diff against remote source
   doctor               Check required local tools
 
@@ -61,76 +64,137 @@ module_selected() {
 installed_hash_for() {
     local target="$1"
     [[ -f "$HASH_FILE" ]] || return 0
-    while IFS=$'\t' read -r path hash; do
+    while IFS=$'\t' read -r path hash version; do
         [[ "$path" == "$target" ]] && printf '%s\n' "$hash" && return 0
     done < "$HASH_FILE"
 }
 
+version_for() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line; do
+        case "$line" in
+            '# linux-setup-version: '*) printf '%s\n' "${line#'# linux-setup-version: '}"; return 0 ;;
+        esac
+    done < "$file"
+}
+
+module_for() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line; do
+        case "$line" in
+            '# linux-setup-module: '*) printf '%s\n' "${line#'# linux-setup-module: '}"; return 0 ;;
+        esac
+    done < "$file"
+}
+
+version_gt() {
+    local remote="$1" local_version="$2" i remote_part local_part max
+    [[ -z "$remote" ]] && return 1
+    [[ -z "$local_version" ]] && return 0
+    [[ "$remote" == "$local_version" ]] && return 1
+
+    local -a remote_parts local_parts
+    IFS='.' read -r -a remote_parts <<< "$remote"
+    IFS='.' read -r -a local_parts <<< "$local_version"
+    max=${#remote_parts[@]}
+    ((${#local_parts[@]} > max)) && max=${#local_parts[@]}
+
+    for ((i = 0; i < max; i++)); do
+        remote_part="${remote_parts[$i]:-0}"
+        local_part="${local_parts[$i]:-0}"
+        [[ "$remote_part" =~ ^[0-9]+$ ]] || remote_part=0
+        [[ "$local_part" =~ ^[0-9]+$ ]] || local_part=0
+        ((10#$remote_part > 10#$local_part)) && return 0
+        ((10#$remote_part < 10#$local_part)) && return 1
+    done
+
+    return 1
+}
+
 record_hash() {
-    local target="$1" hash="$2" tmp
+    local target="$1" hash="$2" version="$3" tmp
     mkdir -p "$STATE_DIR"
     tmp=$(mktemp)
     if [[ -f "$HASH_FILE" ]]; then
-        while IFS=$'\t' read -r path old_hash; do
+        while IFS=$'\t' read -r path old_hash old_version; do
             [[ "$path" == "$target" ]] && continue
-            printf '%s\t%s\n' "$path" "$old_hash"
+            printf '%s\t%s\t%s\n' "$path" "$old_hash" "${old_version:-}"
         done < "$HASH_FILE" > "$tmp"
     fi
-    printf '%s\t%s\n' "$target" "$hash" >> "$tmp"
+    printf '%s\t%s\t%s\n' "$target" "$hash" "$version" >> "$tmp"
     mv "$tmp" "$HASH_FILE"
-}
-
-managed_header() {
-    local module="$1" source="$2"
-    cat <<EOF
-# Managed by linux-setup
-# Module: $module
-# Source: https://github.com/LPFchan/linux-setup/blob/main/$source
-EOF
 }
 
 install_one() {
     local module="$1" target_spec="$2" mode="$3" source="$4"
-    local target dir tmp payload old_hash current_hash new_hash install_target
+    local target dir payload old_hash current_hash new_hash install_target local_version remote_version remote_module
 
     target=$(expand_path "$target_spec")
     dir=$(dirname "$target")
     mkdir -p "$dir"
 
-    tmp=$(mktemp)
     payload=$(mktemp)
 
     curl -fsSL "$BASE_URL/$source" -o "$payload"
-    {
-        managed_header "$module" "$source"
-        printf '\n'
-        cat "$payload"
-    } > "$tmp"
+    remote_version=$(version_for "$payload" || true)
+    remote_module=$(module_for "$payload" || true)
 
-    new_hash=$(sha256 "$tmp")
+    if [[ "$remote_module" != "$module" ]]; then
+        echo "Metadata mismatch for $source: expected module '$module', got '${remote_module:-missing}'" >&2
+        rm -f "$payload"
+        return 1
+    fi
+    if [[ -z "$remote_version" ]]; then
+        echo "Missing linux-setup-version in $source" >&2
+        rm -f "$payload"
+        return 1
+    fi
+
+    new_hash=$(sha256 "$payload")
     old_hash=$(installed_hash_for "$target" || true)
+    local_version=$(version_for "$target" || true)
+
+    if [[ -f "$target" && -n "$local_version" ]] && ! version_gt "$remote_version" "$local_version" && [[ "$FORCE" -ne 1 ]]; then
+        if [[ -n "$old_hash" ]]; then
+            current_hash=$(sha256 "$target")
+            if [[ "$current_hash" != "$old_hash" ]]; then
+                echo "Local changes detected: $module remains at $local_version"
+                rm -f "$payload"
+                return 0
+            fi
+        fi
+        echo "Current $module $local_version"
+        rm -f "$payload"
+        return 0
+    fi
 
     if [[ -f "$target" && -n "$old_hash" ]]; then
         current_hash=$(sha256 "$target")
         if [[ "$current_hash" != "$old_hash" && "$FORCE" -ne 1 ]]; then
             install_target="$target.new"
-            install -m "$mode" "$tmp" "$install_target"
-            echo "Local changes detected: wrote $install_target"
-            rm -f "$tmp" "$payload"
+            install -m "$mode" "$payload" "$install_target"
+            echo "Local changes detected: wrote $install_target for $module $remote_version"
+            rm -f "$payload"
             return 0
         fi
     elif [[ -f "$target" && "$FORCE" -ne 1 ]]; then
         install_target="$target.new"
-        install -m "$mode" "$tmp" "$install_target"
-        echo "Untracked existing file: wrote $install_target"
-        rm -f "$tmp" "$payload"
+        install -m "$mode" "$payload" "$install_target"
+        echo "Untracked existing file: wrote $install_target for $module $remote_version"
+        rm -f "$payload"
         return 0
     fi
 
-    install -m "$mode" "$tmp" "$target"
-    record_hash "$target" "$new_hash"
-    echo "Installed $module -> $target"
-    rm -f "$tmp" "$payload"
+    install -m "$mode" "$payload" "$target"
+    record_hash "$target" "$new_hash" "$remote_version"
+    if [[ -n "$local_version" && "$local_version" != "$remote_version" ]]; then
+        echo "Updated $module $local_version -> $remote_version"
+    else
+        echo "Installed $module $remote_version -> $target"
+    fi
+    rm -f "$payload"
 }
 
 cmd_list() {
@@ -156,22 +220,20 @@ cmd_install() {
 
 cmd_diff() {
     fetch_manifest
-    local module target mode source local_path tmp payload found=0
+    local module target mode source local_path payload found=0
     while IFS=$'\t' read -r module target mode source; do
         [[ -z "${module:-}" || "$module" == \#* ]] && continue
         module_selected "$module" "$@" || continue
         found=1
         local_path=$(expand_path "$target")
-        tmp=$(mktemp)
         payload=$(mktemp)
         curl -fsSL "$BASE_URL/$source" -o "$payload"
-        { managed_header "$module" "$source"; printf '\n'; cat "$payload"; } > "$tmp"
         if [[ -f "$local_path" ]]; then
-            diff -u "$local_path" "$tmp" || true
+            diff -u "$local_path" "$payload" || true
         else
             echo "Missing: $local_path"
         fi
-        rm -f "$tmp" "$payload"
+        rm -f "$payload"
     done < "$MANIFEST_FILE"
     ((found == 1)) || { echo "No matching modules." >&2; exit 1; }
 }

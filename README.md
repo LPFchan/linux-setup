@@ -9,7 +9,7 @@ This repo is the source of truth for live scripts and generated config. Obsidian
 Install the updater CLI:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LPFchan/linux-setup/main/install.sh | bash
+curl -fsSL https://setup.lost.plus/install.sh | bash
 ```
 
 Install managed modules:
@@ -36,7 +36,17 @@ linux-setup doctor
 
 ## Drift Policy
 
-Managed files carry a source header and are tracked by SHA-256 after install. Updates replace a file automatically only when it still matches the last installed hash.
+Managed files carry version metadata in the file itself:
+
+```bash
+# linux-setup-module: resume
+# linux-setup-version: 2026.06.05.1
+# linux-setup-source: files/resume
+```
+
+`linux-setup update` fetches the remote file, reads its version, compares it with the local file version, and installs only when the remote version is newer or the local file is missing.
+
+Installed files are also tracked by SHA-256 in `~/.local/state/linux-setup/installed.tsv`. Updates replace a file automatically only when it still matches the last installed hash.
 
 If a local file has been edited, `linux-setup` writes the new version beside it as `<path>.new` unless `--force` is used.
 
@@ -51,7 +61,23 @@ If a local file has been edited, `linux-setup` writes the new version beside it 
 ## Design
 
 - GitHub is the canonical code host.
+- GitHub Pages serves the public installer at `https://setup.lost.plus`.
 - `install.sh` only bootstraps the updater CLI.
 - `manifest.tsv` declares module, target path, mode, and source path.
+- Each managed source file declares its own module and version.
 - Obsidian documents behavior and links to canonical files here.
 - Secrets do not belong in this repo.
+
+## Development
+
+Use the local checkout as the source root while testing:
+
+```bash
+LINUX_SETUP_BASE_URL=file://$PWD ./bin/linux-setup update resume ai-menu
+```
+
+The raw GitHub URL also works as a fallback:
+
+```bash
+LINUX_SETUP_BASE_URL=https://raw.githubusercontent.com/LPFchan/linux-setup/main linux-setup update
+```

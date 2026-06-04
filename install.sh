@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${LINUX_SETUP_BASE_URL:-https://raw.githubusercontent.com/LPFchan/linux-setup/main}"
+BASE_URL="${LINUX_SETUP_BASE_URL:-https://setup.lost.plus}"
 BIN_DIR="$HOME/.local/bin"
 TARGET="$BIN_DIR/linux-setup"
 

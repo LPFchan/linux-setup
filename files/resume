@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# linux-setup-module: resume
+# linux-setup-version: 2026.06.05.1
+# linux-setup-source: files/resume
 # resume - interactively pick and resume a Claude Code, Codex, OpenCode, or ForgeCode session
 
 set -euo pipefail
