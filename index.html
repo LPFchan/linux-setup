@@ -420,6 +420,7 @@
     }
 
     function handleDemoKey(event) {
+      if (event.target === button) return;
       const rows = visibleRows();
       if (!rows.length) return;
       const currentVisible = selectedVisibleIndex(rows);
@@ -480,7 +481,6 @@
 
     if (term) {
       term.open(terminalElement);
-      term.onKey(({ domEvent }) => handleDemoKey(domEvent));
       terminalElement.addEventListener('click', () => term.focus());
       window.addEventListener('resize', () => {
         term.resize(terminalCols(), 13);
@@ -491,8 +491,9 @@
     } else {
       renderDemo();
       terminalElement.tabIndex = 0;
-      terminalElement.addEventListener('keydown', handleDemoKey);
     }
+
+    document.addEventListener('keydown', handleDemoKey);
 
     loadDemoSources();
     setInterval(loadDemoSources, 60000);
