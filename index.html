@@ -36,7 +36,7 @@
     main {
       width: min(760px, 100%);
       display: grid;
-      gap: 22px;
+      gap: 20px;
       justify-items: center;
       text-align: center;
     }
@@ -55,6 +55,87 @@
       font-family: var(--mono);
       font-size: 13px;
       letter-spacing: 0.04em;
+    }
+
+    .demo {
+      width: min(620px, 100%);
+      border: 1px solid var(--line);
+      background: var(--panel);
+      font-family: var(--mono);
+      text-align: left;
+    }
+
+    .screen {
+      padding: 14px;
+    }
+
+    .screen-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .query {
+      margin-top: 12px;
+      color: var(--fg);
+      font-size: 13px;
+    }
+
+    .query span { color: var(--hot); }
+
+    .rows {
+      display: grid;
+      gap: 2px;
+      margin-top: 10px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 8px;
+      width: 100%;
+      padding: 8px 6px;
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      font: inherit;
+      font-size: 13px;
+      line-height: 1.25;
+      text-align: left;
+      cursor: pointer;
+      transition: color 120ms ease, background 120ms ease;
+    }
+
+    .row[aria-selected="true"] {
+      color: var(--bg);
+      background: var(--hot);
+    }
+
+    .row small {
+      display: block;
+      margin-top: 3px;
+      color: inherit;
+      opacity: 0.68;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .screen-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
     }
 
     .command {
@@ -79,7 +160,7 @@
       white-space: nowrap;
     }
 
-    button {
+    #copy-button {
       border: 0;
       border-left: 1px solid var(--line);
       color: var(--bg);
@@ -91,10 +172,10 @@
       transition: filter 150ms ease, opacity 180ms ease;
     }
 
-    button.is-fading { opacity: 0; }
+    #copy-button.is-fading { opacity: 0; }
 
-    button:active { filter: brightness(0.8); }
-    button:focus-visible { outline: 2px solid var(--fg); outline-offset: -5px; }
+    #copy-button:active { filter: brightness(0.8); }
+    #copy-button:focus-visible { outline: 2px solid var(--fg); outline-offset: -5px; }
 
     footer {
       position: fixed;
@@ -117,13 +198,19 @@
 
     @media (max-width: 560px) {
       .command { grid-template-columns: 1fr; }
-      button { min-height: 56px; border-left: 0; border-top: 1px solid var(--line); }
+      #copy-button { min-height: 56px; border-left: 0; border-top: 1px solid var(--line); }
+      .screen { padding: 12px; }
+      .screen-head, .screen-foot { font-size: 10px; }
+      .row { font-size: 12px; }
     }
   </style>
 </head>
 <body>
   <main>
     <h1>linux-setup</h1>
+    <section class="demo" aria-label="Interactive ai-menu and resume demo">
+      <div class="screen" id="demo-screen" tabindex="0"></div>
+    </section>
     <div class="command" role="group" aria-label="Install command">
       <code id="install-command">curl -fsSL https://setup.lost.plus/install.sh | bash</code>
       <button id="copy-button" type="button" aria-label="Copy install command">copy</button>
@@ -136,6 +223,90 @@
   <script>
     const button = document.getElementById('copy-button');
     const command = document.getElementById('install-command').textContent;
+    const screen = document.getElementById('demo-screen');
+    const demoState = { mode: 'ai', selected: { ai: 4, resume: 0 } };
+    const demos = {
+      ai: {
+        title: 'current machine: grimoire',
+        prompt: '▌ ',
+        footer: 'ENTER launch · ↑↓ select · resume opens picker',
+        rows: [
+          ['claude', 'start Claude Code in this shell'],
+          ['codex', 'launch npm-prefix Codex binary'],
+          ['opencode', 'start OpenCode with Exa enabled'],
+          ['grimoire', 'ssh host from ~/.ssh/config'],
+          ['resume', 'open previous AI session picker'],
+          ['neither', 'return to shell']
+        ]
+      },
+      resume: {
+        title: 'resume >',
+        prompt: 'resume > ',
+        footer: 'ENTER resume · ESC/Ctrl-C back to ai-menu',
+        rows: [
+          ['06/04 17:29  opencode  ~/linux-setup', 'Polish minimal landing page'],
+          ['06/04 17:16  claude    ~/linux-setup', 'Minimize landing page and auto-install modules'],
+          ['06/04 16:57  codex     ~/vaultwarden-mcp', 'Cloudflare DNS record debugging'],
+          ['06/03 22:04  forge     ~/grimoire', 'cgroup monitor cleanup'],
+          ['06/03 14:12  claude    ~', 'Shell startup guard review']
+        ]
+      }
+    };
+
+    function renderDemo() {
+      const data = demos[demoState.mode];
+      const selected = demoState.selected[demoState.mode];
+      screen.innerHTML = `
+        <div class="screen-head"><span>${data.title}</span><span>${selected + 1}/${data.rows.length}</span></div>
+        <div class="query"><span>${data.prompt}</span>${demoState.mode === 'ai' ? 'pick tool or host' : 'previous conversations'}</div>
+        <div class="rows">
+          ${data.rows.map((row, index) => `
+            <button class="row" type="button" aria-selected="${index === selected}" data-index="${index}">
+              <span>${index === selected ? '▌' : ''}</span>
+              <span>${row[0]}<small>${row[1]}</small></span>
+            </button>
+          `).join('')}
+        </div>
+        <div class="screen-foot"><span>${data.footer}</span><span>${demoState.mode}</span></div>
+      `;
+      screen.querySelectorAll('.row').forEach((row) => {
+        row.addEventListener('click', () => {
+          demoState.selected[demoState.mode] = Number(row.dataset.index);
+          if (demoState.mode === 'ai' && demos.ai.rows[demoState.selected.ai][0] === 'resume') {
+            demoState.mode = 'resume';
+          }
+          renderDemo();
+        });
+      });
+    }
+
+    screen.addEventListener('keydown', (event) => {
+      const rows = demos[demoState.mode].rows;
+      if (event.key === 'ArrowDown' || event.key === 'j') {
+        event.preventDefault();
+        demoState.selected[demoState.mode] = (demoState.selected[demoState.mode] + 1) % rows.length;
+        renderDemo();
+      }
+      if (event.key === 'ArrowUp' || event.key === 'k') {
+        event.preventDefault();
+        demoState.selected[demoState.mode] = (demoState.selected[demoState.mode] - 1 + rows.length) % rows.length;
+        renderDemo();
+      }
+      if (event.key === 'Enter' && demoState.mode === 'ai') {
+        event.preventDefault();
+        if (demos.ai.rows[demoState.selected.ai][0] === 'resume') {
+          demoState.mode = 'resume';
+          renderDemo();
+        }
+      }
+      if (demoState.mode === 'resume' && (event.key === 'Escape' || (event.ctrlKey && event.key.toLowerCase() === 'c'))) {
+        event.preventDefault();
+        demoState.mode = 'ai';
+        renderDemo();
+      }
+    });
+
+    renderDemo();
 
     function fallbackCopy(text) {
       const textarea = document.createElement('textarea');
