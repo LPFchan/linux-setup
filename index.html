@@ -299,6 +299,9 @@
       dim: '\x1b[38;2;119;119;114m',
       fg: '\x1b[38;2;241;241;238m',
       hot: '\x1b[38;2;200;255;61m',
+      cyan: '\x1b[38;2;96;210;255m',
+      magenta: '\x1b[38;2;255;96;210m',
+      yellow: '\x1b[38;2;255;210;96m',
       reverse: '\x1b[7m'
     };
 
@@ -317,9 +320,19 @@
         selectionBackground: '#f1f1ee',
         selectionForeground: '#050505',
         black: '#050505',
+        red: '#ff5f57',
+        yellow: '#ffd866',
+        blue: '#60d2ff',
+        magenta: '#ff60d2',
+        cyan: '#60d2ff',
+        white: '#f1f1ee',
         brightBlack: '#777772',
         green: '#c8ff3d',
-        brightGreen: '#c8ff3d'
+        brightGreen: '#c8ff3d',
+        brightCyan: '#60d2ff',
+        brightMagenta: '#ff60d2',
+        brightYellow: '#ffd866',
+        brightWhite: '#ffffff'
       },
       convertEol: true,
       disableStdin: false,
@@ -339,6 +352,12 @@
       if (demoState.mode === 'ai') return row.label;
       const cwd = (row.cwd || '').padEnd(22, ' ').slice(0, 22);
       return `${row.ts}  ${row.tool}  ${cwd}  ${row.title}`;
+    }
+
+    function colorRow(row) {
+      if (demoState.mode === 'ai') return `${ansi.fg}${row.label}`;
+      const cwd = (row.cwd || '').padEnd(22, ' ').slice(0, 22);
+      return `${ansi.dim}${row.ts}${ansi.reset}  ${ansi.cyan}${row.tool}${ansi.reset}  ${ansi.yellow}${cwd}${ansi.reset}  ${ansi.fg}${row.title}`;
     }
 
     function visibleRows() {
@@ -366,15 +385,15 @@
       const cols = term ? term.cols : terminalCols();
       const inner = cols;
       const prompt = demoState.mode === 'ai'
-        ? `▌ ${demoState.query.ai}`
-        : `resume > ${demoState.query.resume}`;
+        ? `${ansi.hot}▌${ansi.reset} ${ansi.fg}${demoState.query.ai}`
+        : `${ansi.magenta}resume >${ansi.reset} ${ansi.fg}${demoState.query.resume}`;
       const header = demoState.mode === 'ai'
         ? 'current machine: grimoire'
         : 'ENTER: resume   ESC: cancel';
 
       const lines = [
         `${ansi.dim}${clip(header, inner)}${ansi.reset}`,
-        `${ansi.hot}${clip(prompt, inner)}${ansi.reset}`
+        prompt
       ];
 
       if (demoState.status) lines.push(`${ansi.dim}${clip(demoState.status, inner)}${ansi.reset}`);
@@ -382,11 +401,11 @@
       rows.forEach(({ row, index }) => {
         const isSelected = index === demoState.selected[demoState.mode];
         const prefix = isSelected ? '▌ ' : '  ';
-        const text = clip(prefix + rowText(row), inner);
+        const plainText = clip(prefix + rowText(row), inner);
         if (isSelected) {
-          lines.push(`${ansi.reverse}${text}${ansi.reset}`);
+          lines.push(`${ansi.reverse}${plainText}${ansi.reset}`);
         } else {
-          lines.push(`${ansi.fg}${text}${ansi.reset}`);
+          lines.push(prefix + colorRow(row));
         }
       });
 
