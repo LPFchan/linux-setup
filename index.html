@@ -60,15 +60,14 @@
 
     .demo {
       width: min(620px, 100%);
-      border: 1px solid var(--line);
-      background: var(--panel);
-      padding: 8px;
+      background: #000;
+      padding: 0;
       text-align: left;
       cursor: text;
     }
 
     #terminal {
-      height: 238px;
+      height: 250px;
     }
 
     .xterm {
@@ -140,7 +139,7 @@
     @media (max-width: 560px) {
       .command { grid-template-columns: 1fr; }
       #copy-button { min-height: 56px; border-left: 0; border-top: 1px solid var(--line); }
-      #terminal { height: 226px; }
+      #terminal { height: 236px; }
     }
   </style>
 </head>
@@ -190,14 +189,14 @@
       }
     };
 
-    const toolDescriptions = {
-      claude: 'executes the claude case branch',
-      codex: 'executes the npm-prefix-aware codex branch',
-      opencode: 'executes OPENCODE_ENABLE_EXA=1 opencode',
-      resume: 'calls the managed resume script',
-      neither: 'no-op; returns to shell',
-      'ssh-host': 'generated from Host entries in ~/.ssh/config'
-    };
+    const sampleHosts = ['grimoire', 'oci-ubuntu', 'bingus'];
+    const sampleSessions = [
+      { ts: '06/04 17:43', tool: 'opencode', cwd: '~/linux-setup', title: 'Use xterm live script demo', action: 'opencode --session ses_demo_7b2f' },
+      { ts: '06/04 17:36', tool: 'opencode', cwd: '~/linux-setup', title: 'Add interactive menu demo', action: 'opencode --session ses_demo_4a19' },
+      { ts: '06/04 17:16', tool: 'claude  ', cwd: '~/linux-setup', title: 'Minimize landing page and auto-install modules', action: 'claude --resume 00000000-0000-4000-8000-000000000001' },
+      { ts: '06/04 16:57', tool: 'codex   ', cwd: '~/vaultwarden-mcp', title: 'Cloudflare DNS record debugging', action: 'codex resume rollout-demo' },
+      { ts: '06/03 22:04', tool: 'forge   ', cwd: '~/grimoire', title: 'cgroup monitor cleanup', action: 'forge --conversation-id conv_demo' }
+    ];
 
     function meta(source, key) {
       const match = source.match(new RegExp(`^# linux-setup-${key}:\\s*(.+)$`, 'm'));
@@ -226,17 +225,17 @@
         optionsMatch[1].trim().split(/\s+/).filter(Boolean).forEach((name) => {
           rows.push({
             label: name,
-            detail: compactCommand(caseBody(source, name)) || toolDescriptions[name] || 'listed in options=(...)',
+            detail: compactCommand(caseBody(source, name)) || name,
             action: name
           });
         });
       }
       if (/ssh_hosts=/.test(source)) {
-        rows.push({ label: 'grimoire', detail: toolDescriptions['ssh-host'], action: 'ssh' });
+        sampleHosts.forEach((host) => rows.push({ label: host, detail: `ssh ${host}`, action: 'ssh' }));
       }
       if (/options\+=\(resume neither\)/.test(source)) {
-        rows.push({ label: 'resume', detail: compactCommand(caseBody(source, 'resume')) || toolDescriptions.resume, action: 'resume' });
-        rows.push({ label: 'neither', detail: compactCommand(caseBody(source, 'neither|""')) || toolDescriptions.neither, action: 'neither' });
+        rows.push({ label: 'resume', detail: compactCommand(caseBody(source, 'resume')) || 'resume', action: 'resume' });
+        rows.push({ label: 'neither', detail: compactCommand(caseBody(source, 'neither|""')) || 'return to shell', action: 'neither' });
       }
       return rows.length ? rows : [{ label: 'source loaded', detail: 'no menu entries parsed', action: 'none' }];
     }
@@ -250,19 +249,11 @@
         fg: { label: 'forge', store: source.match(/FG_DB="([^"]+)"/)?.[1] || '~/.forge/.forge.db' }
       };
 
-      for (const key of Object.keys(tools)) {
-        if (source.includes(`${key}) label=`) || source.includes(`${key}) exec `)) {
-          rows.push({
-            label: tools[key].label,
-            detail: `${tools[key].store} -> ${compactCommand(caseBody(source, key))}`,
-            action: key
-          });
-        }
-      }
-
-      if (/parent_id IS NULL/.test(source)) rows.push({ label: 'filter', detail: 'OpenCode subagents hidden via parent_id IS NULL', action: 'info' });
-      if (/CodexBar/.test(source)) rows.push({ label: 'filter', detail: 'CodexBar probe cwd excluded before display', action: 'info' });
-      return rows.length ? rows : [{ label: 'source loaded', detail: 'no resume backends parsed', action: 'none' }];
+      sampleSessions.forEach((session) => {
+        const key = Object.entries(tools).find(([, value]) => value.label.trim() === session.tool.trim())?.[0];
+        if (!key || source.includes(`${key}) exec `)) rows.push({ ...session, label: session.tool.trim(), detail: session.title, action: session.action });
+      });
+      return rows.length ? rows : [{ label: 'No sessions found.', detail: '', action: 'none' }];
     }
 
     async function fetchSource(path) {
@@ -295,7 +286,7 @@
         const fixedResumeIndex = demos.ai.rows.findIndex((row) => row.label === 'resume');
         demoState.selected.ai = fixedResumeIndex >= 0 ? fixedResumeIndex : 0;
         demoState.selected.resume = 0;
-        demoState.status = 'live source loaded';
+        demoState.status = '';
       } catch (error) {
         demos.ai.title = 'source fetch failed';
         demos.ai.footer = String(error.message || error);
@@ -308,22 +299,22 @@
       dim: '\x1b[38;2;119;119;114m',
       fg: '\x1b[38;2;241;241;238m',
       hot: '\x1b[38;2;200;255;61m',
-      selected: '\x1b[30;48;2;200;255;61m'
+      reverse: '\x1b[7m'
     };
 
     const term = window.Terminal ? new Terminal({
       cols: terminalCols(),
-      rows: 12,
+      rows: 13,
       cursorBlink: true,
       cursorStyle: 'block',
       fontFamily: 'SF Mono, JetBrains Mono, IBM Plex Mono, Consolas, monospace',
       fontSize: 13,
       lineHeight: 1.18,
       theme: {
-        background: '#10100f',
+        background: '#000000',
         foreground: '#f1f1ee',
         cursor: '#c8ff3d',
-        selectionBackground: '#c8ff3d',
+        selectionBackground: '#f1f1ee',
         selectionForeground: '#050505',
         black: '#050505',
         brightBlack: '#777772',
@@ -336,7 +327,7 @@
     }) : null;
 
     function terminalCols() {
-      return Math.max(46, Math.min(74, Math.floor((terminalElement.clientWidth - 16) / 8)));
+      return Math.max(46, Math.min(78, Math.floor(terminalElement.clientWidth / 8)));
     }
 
     function clip(text, width) {
@@ -345,7 +336,9 @@
     }
 
     function rowText(row) {
-      return demoState.mode === 'ai' ? `${row.label}  ${row.detail}` : `${row.label}  ${row.detail}`;
+      if (demoState.mode === 'ai') return row.label;
+      const cwd = (row.cwd || '').padEnd(22, ' ').slice(0, 22);
+      return `${row.ts}  ${row.tool}  ${cwd}  ${row.title}`;
     }
 
     function visibleRows() {
@@ -354,7 +347,7 @@
       if (!query) return data.rows.map((row, index) => ({ row, index }));
       return data.rows
         .map((row, index) => ({ row, index }))
-        .filter(({ row }) => `${row.label} ${row.detail}`.toLowerCase().includes(query));
+        .filter(({ row }) => rowText(row).toLowerCase().includes(query));
     }
 
     function selectedVisibleIndex(rows) {
@@ -371,48 +364,40 @@
         demoState.selected[demoState.mode] = rows[visibleSelected].index;
       }
       const cols = term ? term.cols : terminalCols();
-      const inner = cols - 2;
-      const topLabel = demoState.mode === 'ai' ? ` ${data.title} ` : ' resume sessions ';
-      const top = '┌' + topLabel + '─'.repeat(Math.max(0, inner - topLabel.length)) + '┐';
-      const bottom = '└' + '─'.repeat(inner) + '┘';
+      const inner = cols;
       const prompt = demoState.mode === 'ai'
-        ? `▌ ${demoState.query.ai || 'pick tool or host'}`
-        : `resume > ${demoState.query.resume || 'previous conversations'}`;
-      const footer = demoState.mode === 'ai'
-        ? 'type filters · ENTER dispatches parsed case branch'
-        : 'type filters · ENTER shows parsed exec · ESC/Ctrl-C back';
+        ? `▌ ${demoState.query.ai}`
+        : `resume > ${demoState.query.resume}`;
+      const header = demoState.mode === 'ai'
+        ? 'current machine: grimoire'
+        : 'ENTER: resume   ESC: cancel';
 
       const lines = [
-        `${ansi.dim}${top}${ansi.reset}`,
-        `${ansi.dim}│${ansi.reset}${clip(prompt, inner)}${ansi.dim}│${ansi.reset}`,
-        `${ansi.dim}├${'─'.repeat(inner)}┤${ansi.reset}`
+        `${ansi.dim}${clip(header, inner)}${ansi.reset}`,
+        `${ansi.hot}${clip(prompt, inner)}${ansi.reset}`
       ];
+
+      if (demoState.status) lines.push(`${ansi.dim}${clip(demoState.status, inner)}${ansi.reset}`);
 
       rows.forEach(({ row, index }) => {
         const isSelected = index === demoState.selected[demoState.mode];
         const prefix = isSelected ? '▌ ' : '  ';
         const text = clip(prefix + rowText(row), inner);
         if (isSelected) {
-          lines.push(`${ansi.dim}│${ansi.reset}${ansi.selected}${text}${ansi.reset}${ansi.dim}│${ansi.reset}`);
+          lines.push(`${ansi.reverse}${text}${ansi.reset}`);
         } else {
-          lines.push(`${ansi.dim}│${ansi.reset}${ansi.fg}${text}${ansi.reset}${ansi.dim}│${ansi.reset}`);
+          lines.push(`${ansi.fg}${text}${ansi.reset}`);
         }
       });
 
-      while (lines.length < 10) {
-        lines.push(`${ansi.dim}│${ansi.reset}${' '.repeat(inner)}${ansi.dim}│${ansi.reset}`);
-      }
-
-      lines.push(`${ansi.dim}├${'─'.repeat(inner)}┤${ansi.reset}`);
-      lines.push(`${ansi.dim}│${ansi.reset}${ansi.hot}${clip(demoState.status || footer, inner)}${ansi.reset}${ansi.dim}│${ansi.reset}`);
-      lines.push(`${ansi.dim}${bottom}${ansi.reset}`);
+      while (lines.length < 13) lines.push('');
 
       if (!term) {
         terminalElement.innerHTML = `<pre>${lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '')}</pre>`;
         return;
       }
 
-      term.write('\x1b[2J\x1b[H' + lines.join('\r\n'));
+      term.write('\x1b[2J\x1b[H' + lines.slice(0, 13).join('\r\n'));
     }
 
     function handleDemoKey(event) {
@@ -449,19 +434,19 @@
         if (demoState.mode === 'ai' && selectedRow?.action === 'resume') {
           demoState.mode = 'resume';
           demoState.query.resume = '';
-          demoState.status = 'exec resume';
+          demoState.status = '';
           renderDemo();
           return;
         }
         if (demoState.mode === 'ai') {
           demoState.status = selectedRow?.action === 'neither'
             ? 'returning to shell'
-            : `$ ${selectedRow?.detail || selectedRow?.label}`;
+            : selectedRow?.detail || selectedRow?.label;
           renderDemo();
           return;
         }
         if (demoState.mode === 'resume') {
-          demoState.status = selectedRow?.detail || 'resume selected';
+          demoState.status = `Resuming ${selectedRow?.label || 'session'} session... ${selectedRow?.action || ''}`;
           renderDemo();
         }
       }
@@ -469,7 +454,7 @@
         event.preventDefault();
         demoState.mode = 'ai';
         demoState.query.resume = '';
-        demoState.status = 'cancelled resume; back to ai-menu';
+        demoState.status = '';
         renderDemo();
       }
     }
@@ -479,7 +464,7 @@
       term.onKey(({ domEvent }) => handleDemoKey(domEvent));
       terminalElement.addEventListener('click', () => term.focus());
       window.addEventListener('resize', () => {
-        term.resize(terminalCols(), 12);
+        term.resize(terminalCols(), 13);
         renderDemo();
       });
       renderDemo();
