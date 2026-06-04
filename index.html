@@ -296,13 +296,13 @@
 
     const ansi = {
       reset: '\x1b[0m',
-      dim: '\x1b[38;2;119;119;114m',
-      fg: '\x1b[38;2;241;241;238m',
-      hot: '\x1b[38;2;200;255;61m',
-      cyan: '\x1b[38;2;96;210;255m',
-      magenta: '\x1b[38;2;255;96;210m',
-      yellow: '\x1b[38;2;255;210;96m',
-      reverse: '\x1b[7m'
+      dim: '\x1b[90m',
+      fg: '\x1b[37m',
+      hot: '\x1b[92m',
+      cyan: '\x1b[96m',
+      magenta: '\x1b[95m',
+      yellow: '\x1b[93m',
+      selected: '\x1b[30;42m'
     };
 
     const term = window.Terminal ? new Terminal({
@@ -317,10 +317,11 @@
         background: '#000000',
         foreground: '#f1f1ee',
         cursor: '#c8ff3d',
-        selectionBackground: '#f1f1ee',
+        selectionBackground: '#c8ff3d',
         selectionForeground: '#050505',
         black: '#050505',
         red: '#ff5f57',
+        green: '#8fd14f',
         yellow: '#ffd866',
         blue: '#60d2ff',
         magenta: '#ff60d2',
@@ -403,7 +404,7 @@
         const prefix = isSelected ? '▌ ' : '  ';
         const plainText = clip(prefix + rowText(row), inner);
         if (isSelected) {
-          lines.push(`${ansi.reverse}${plainText}${ansi.reset}`);
+          lines.push(`${ansi.selected}${plainText}${ansi.reset}`);
         } else {
           lines.push(prefix + colorRow(row));
         }
