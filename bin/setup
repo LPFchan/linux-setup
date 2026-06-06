@@ -14,6 +14,7 @@ FORCE=0
 SERVICE_MODULES="kernel-simmer service-ctl gpu-fancontrol monitoring refresh-models backup"
 USER_SERVICE_MODULES="refresh-models"
 BATCH=0
+ORIG_ARGS=("$@")
 
 usage() {
     cat <<'EOF'
@@ -430,6 +431,10 @@ install_one() {
         record_hash "$target" "$new_hash" "$new_hash"
         echo "Replaced foreign file: $module -> $target"
         rm -f "$payload"
+        if [[ "$module" == "setup" ]]; then
+            echo "Restarting setup..."
+            exec "$target" "${ORIG_ARGS[@]}"
+        fi
         return 0
     fi
 
@@ -441,6 +446,10 @@ install_one() {
         echo "Installed $module -> $target"
     fi
     rm -f "$payload"
+    if [[ "$module" == "setup" ]]; then
+        echo "Restarting setup..."
+        exec "$target" "${ORIG_ARGS[@]}"
+    fi
 }
 
 status_one() {
