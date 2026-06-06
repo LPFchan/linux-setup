@@ -61,11 +61,17 @@ prepend_block_once() {
 configure_shell() {
     local path_block zsh_ai_block bash_ai_block bash_profile_block
 
-    # Clean up old ai-start-menu references so new ai-menu blocks are written
-    for _f in "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.bashrc"; do
+    # Clean up old ai-start-menu managed blocks so new ai-menu blocks are written
+    for _f in "$HOME/.zshrc" "$HOME/.bashrc"; do
         if [[ -f "$_f" ]] && grep -q 'ai-start-menu' "$_f" 2>/dev/null; then
-            sed -i '' -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
-            sed -i -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
+            _tmp=$(mktemp)
+            awk '
+                /^# >>> linux-setup:zsh-ai >>>/   { skip=1; next }
+                /^# >>> linux-setup:bash-ai >>>/  { skip=1; next }
+                /^# <<< linux-setup:zsh-ai <<</   { skip=0; next }
+                /^# <<< linux-setup:bash-ai <<</  { skip=0; next }
+                !skip { print }
+            ' "$_f" > "$_tmp" && mv "$_tmp" "$_f"
         fi
     done
 
