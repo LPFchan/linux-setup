@@ -324,13 +324,12 @@ def cmd_enable():
         )
         print("refresh-models timer enabled (hourly)")
 
-    # ... (rest stays the same)
+    # --- config onboarding ---
 
     cfg_dir = os.path.dirname(CONFIG_PATH)
     pathlib.Path(cfg_dir).mkdir(parents=True, exist_ok=True)
 
-    if not os.path.exists(CONFIG_PATH):
-        default_config = {
+    default_config = {
         "servers": {
             "grimoire": {
                 "baseURL": "http://localhost:9001/v1",
@@ -356,44 +355,51 @@ def cmd_enable():
     if not os.path.exists(CONFIG_PATH):
         save_json(CONFIG_PATH, default_config)
         print(f"  Wrote default config to {CONFIG_PATH}")
-    else:
-        cfg = load_json(CONFIG_PATH)
-        existing = cfg.get("servers", {})
-        added = []
-        for name, srv in default_config["servers"].items():
-            if name not in existing:
-                existing[name] = srv
-                added.append(name)
-        if added:
-            cfg["servers"] = existing
-            save_json(CONFIG_PATH, cfg)
-            print(f"  Added new providers to config: {', '.join(added)}")
-        servers = existing
-        auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
-        missing = [s for s in servers if s not in auth_data]
-        if missing:
+
+    # Merge any newly-added providers into existing config
+    cfg = load_json(CONFIG_PATH)
+    existing = cfg.get("servers", {})
+    added = []
+    for name, srv in default_config["servers"].items():
+        if name not in existing:
+            existing[name] = srv
+            added.append(name)
+    if added:
+        cfg["servers"] = existing
+        save_json(CONFIG_PATH, cfg)
+        print(f"  Added new providers to config: {', '.join(added)}")
+
+    servers = cfg.get("servers", {})
+    auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
+    missing = [s for s in servers if s not in auth_data]
+    if missing:
+        print()
+        miss_list = ", ".join(missing)
+        print(f"  {len(missing)} provider(s) missing API keys: {miss_list}")
+        if not sys.stdin.isatty():
+            marker = os.path.expanduser("~/.local/state/setup/refresh-models.needs-auth")
+            pathlib.Path(os.path.dirname(marker)).mkdir(parents=True, exist_ok=True)
+            with open(marker, "w") as f:
+                f.write("\n".join(missing) + "\n")
+        else:
             print()
-            if sys.stdin.isatty():
-                print(f"  {len(missing)} provider(s) need API keys: {', '.join(missing)}")
-                print()
-                updated = False
-                for s in missing:
-                    url = PROVIDER_URLS.get(s, "")
-                    prompt = f"  {s} API key" + (f" ({url})" if url else "") + ": "
-                    try:
-                        key = getpass.getpass(prompt)
-                    except (EOFError, KeyboardInterrupt):
-                        print()
-                        break
-                    if key.strip():
-                        auth_data[s] = {"type": "api", "key": key.strip()}
-                        updated = True
-                if updated:
-                    save_json(AUTH_PATH, auth_data)
-                    print(f"  Saved to {AUTH_PATH}")
+            updated = False
+            for s in missing:
+                url = PROVIDER_URLS.get(s, "")
+                prompt = f"  {s} API key" + (f" ({url})" if url else "") + ": "
+                try:
+                    key = getpass.getpass(prompt)
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
+                if key.strip():
+                    auth_data[s] = {"type": "api", "key": key.strip()}
+                    updated = True
+            if updated:
+                save_json(AUTH_PATH, auth_data)
+                print(f"\nSaved to {AUTH_PATH}")
             else:
-                print(f"  {len(missing)} provider(s) missing API keys: {', '.join(missing)}")
-                print(f"  Run: refresh-models auth")
+                print("  Run: refresh-models auth")
 
 
 def cmd_disable():

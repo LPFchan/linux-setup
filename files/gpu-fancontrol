@@ -158,4 +158,13 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("help", "--help", "-h"):
+        print("gpu-fancontrol — GPU-based PWM fan controller")
+        print()
+        print("  Reads GPU temperatures via nvidia-smi and adjusts chassis fan")
+        print("  PWM via a Super I/O hwmon chip (nct6798, nct6775, etc.).")
+        print()
+        print("Usage:  gpu-fancontrol")
+        print("        gpu-fancontrol help")
+        sys.exit(0)
     main()

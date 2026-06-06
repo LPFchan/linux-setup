@@ -6,6 +6,24 @@
 
 set -euo pipefail
 
+usage() {
+    cat <<'EOF'
+Usage: resume [--help]
+
+  Interactively pick and resume a Claude Code, Codex, OpenCode, or
+  ForgeCode session via fzf.
+
+  Without arguments, opens an fzf picker of recent sessions. Selecting
+  a session resumes it with the appropriate tool.
+
+  help    Show this message
+EOF
+}
+
+case "${1:-}" in
+    help|--help|-h) usage; exit 0 ;;
+esac
+
 CLAUDE_DIR="$HOME/.claude/projects"
 CODEX_DIR="$HOME/.codex/sessions"
 OC_DB="$HOME/.local/share/opencode/opencode.db"

@@ -10,6 +10,26 @@
 
 set -eu
 
+usage() {
+    cat <<'EOF'
+monitoring — unified container monitoring daemon
+
+  Runs three parallel loops: cgroup polling (memory/nvidia-smi/health),
+  Docker lifecycle events (blocking stream), and NVIDIA Xid error watch.
+
+Usage:  monitoring [--help]
+
+Environment:
+  GRIMOIRE_CONTAINER    Container name (default: grimoire)
+  GRIMOIRE_MONITOR_INTERVAL  Poll interval seconds (default: 60)
+  GRIMOIRE_HEALTH_URL   Health endpoint (default: http://127.0.0.1:9001/health)
+EOF
+}
+
+case "${1:-}" in
+    help|--help|-h) usage; exit 0 ;;
+esac
+
 CONTAINER="${GRIMOIRE_CONTAINER:-grimoire}"
 INTERVAL="${GRIMOIRE_MONITOR_INTERVAL:-60}"
 HEALTH_URL="${GRIMOIRE_HEALTH_URL:-http://127.0.0.1:9001/health}"

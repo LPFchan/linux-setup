@@ -805,8 +805,17 @@ cmd_reconfigure() {
         for entry in "${non_svc[@]}" "${svc[@]}"; do
             IFS='|' read -r m v s <<< "$entry"
             printf "%-20s %-25s %s\n" "$m" "$v" "$s"
-        done
-    }
+    done
+
+    # Post-reconfigure: check if refresh-models needs auth onboarding
+    local auth_marker="$STATE_DIR/refresh-models.needs-auth"
+    if [[ -f "$auth_marker" ]]; then
+        echo
+        echo "refresh-models is installed but needs API keys. Launching auth..."
+        rm -f "$auth_marker"
+        refresh-models auth
+    fi
+}
 
     while true; do
         local selected mod target mode source cur_state action actions has_svc
@@ -902,13 +911,22 @@ cmd_reconfigure() {
                 uninstall_one "$mod" "$target" "$mode" "$source" ;;
         esac
     done
+
+    # Post-reconfigure: check if refresh-models needs auth onboarding
+    local auth_marker="$STATE_DIR/refresh-models.needs-auth"
+    if [[ -f "$auth_marker" ]]; then
+        echo
+        echo "refresh-models is installed but needs API keys. Launching auth..."
+        rm -f "$auth_marker"
+        refresh-models auth
+    fi
 }
 
 while (($# > 0)); do
     case "$1" in
         --force) FORCE=1; shift ;;
         --batch) BATCH=1; shift ;;
-        -h|--help) usage; exit 0 ;;
+        help|-h|--help) usage; exit 0 ;;
         *) break ;;
     esac
 done
