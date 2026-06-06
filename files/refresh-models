@@ -309,14 +309,19 @@ def cmd_enable():
         with open(plist_path, "w") as f:
             f.write(plist)
         _uid = os.getuid()
+        # Try modern API first, then legacy, neither is fatal
         subprocess.run(["launchctl", "bootout", f"gui/{_uid}/{PLIST_NAME}"],
                        capture_output=True)
-        try:
-            subprocess.run(["launchctl", "bootstrap", f"gui/{_uid}", plist_path],
-                           check=True, capture_output=True)
-        except subprocess.CalledProcessError:
-            subprocess.run(["launchctl", "load", plist_path], check=True)
-        print("refresh-models launchd agent enabled (hourly)")
+        r = subprocess.run(["launchctl", "bootstrap", f"gui/{_uid}", plist_path],
+                           capture_output=True)
+        if r.returncode != 0:
+            r = subprocess.run(["launchctl", "load", plist_path], capture_output=True)
+        if r.returncode == 0:
+            print("refresh-models launchd agent enabled (hourly)")
+        else:
+            print(f"refresh-models installed but launchd enable failed (rc={r.returncode})")
+            if r.stderr:
+                print(r.stderr.decode().rstrip(), file=sys.stderr)
     else:
         pathlib.Path(SERVICE_DIR).mkdir(parents=True, exist_ok=True)
         with open(os.path.join(SERVICE_DIR, "refresh-models.service"), "w") as f:
@@ -435,10 +440,10 @@ def cmd_status():
         plist_path = os.path.join(LAUNCHD_DIR, f"{PLIST_NAME}.plist")
         if os.path.exists(plist_path):
             result = subprocess.run(
-                ["launchctl", "list", PLIST_NAME],
+                ["launchctl", "print", f"gui/{os.getuid()}/{PLIST_NAME}"],
                 capture_output=True, text=True,
             )
-            if PLIST_NAME in result.stdout:
+            if result.returncode == 0:
                 print("timer: active (launchd hourly)")
             else:
                 print("timer: not loaded")
