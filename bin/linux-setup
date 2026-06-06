@@ -692,81 +692,111 @@ module_state() {
 cmd_reconfigure() {
     configure_shell
     fetch_manifest
-    local lines=() module target mode source state env_summary
-
+    local env_summary
     env_summary=$(detect_env_summary)
 
-    # Build fzf input: module_name   (state)
-    # Pre-selected = currently installed
-    while IFS=$'\t' read -r module target mode source; do
-        [[ -z "${module:-}" || "$module" == \#* ]] && continue
-        state=$(module_state "$module" "$target" "$source")
-        lines+=("${module}${module:+ }  (${state})")
-    done < "$MANIFEST_FILE"
-
-    if command -v fzf >/dev/null 2>&1 && [[ -t 1 ]]; then
-        # Build initial selection string: module names pre-selected
-        local sel=""
+    # Build module list with current state
+    build_list() {
+        local fmt=""
         while IFS=$'\t' read -r m t mo s; do
             [[ -z "${m:-}" || "$m" == \#* ]] && continue
+            local st
             st=$(module_state "$m" "$t" "$s")
-            case "$st" in
-                "not installed") ;;
-                *) sel="${sel}${sel:+ }${m}" ;;
-            esac
+            fmt="${fmt}${m}  ${st}"$'\n'
         done < "$MANIFEST_FILE"
+        echo -n "$fmt"
+    }
 
+    while true; do
+        local lines
+        lines=$(build_list)
         local selected
-        selected=$(
-            printf '%s\n' "${lines[@]}" | \
-            fzf --multi \
-                --layout=reverse \
-                --bind='enter:toggle,alt-enter:accept' \
-                --header="${env_summary}  |  ↑↓=navigate  Enter=toggle  Alt+Enter=confirm" \
-                --preview-window=hidden
-        ) || return 0
+        selected=$(echo "$lines" | fzf \
+            --layout=reverse \
+            --header="${env_summary}  |  ↑↓=navigate  Enter=actions  Esc=finish" \
+            --bind='esc:abort' \
+            --preview-window=hidden
+        ) || break
 
-        local -a wanted=()
-        while IFS= read -r line; do
-            mod=$(echo "$line" | awk '{print $1}')
-            [[ -n "$mod" ]] && wanted+=("$mod")
-        done <<< "$selected"
+        local mod
+        mod=$(echo "$selected" | awk '{print $1}')
+        [[ -z "$mod" ]] && break
 
-        # Install + enable wanted
-        for module in "${wanted[@]}"; do
-            while IFS=$'\t' read -r m target mode source; do
-                [[ "$m" == "$module" ]] || continue
-                install_one "$module" "$target" "$mode" "$source"
-                local enable_cmd
-                enable_cmd=$(module_enable_cmd "$module") && {
-                    echo "Enabling $module..."
-                    sudo ${enable_cmd} 2>/dev/null || echo "(enable deferred — run with sudo later)"
-                }
-            done < "$MANIFEST_FILE"
-        done
-
-        # Disable + uninstall not wanted
-        while IFS=$'\t' read -r module target mode source; do
-            [[ -z "${module:-}" || "$module" == \#* ]] && continue
-            local w
-            for w in "${wanted[@]}"; do
-                [[ "$w" == "$module" ]] && continue 2
-            done
-            local target_path
-            target_path=$(expand_path "$target")
-            if [[ -f "$target_path" ]]; then
-                echo "Removing $module..."
-                local disable_cmd
-                disable_cmd=$(module_disable_cmd "$module") && {
-                    sudo ${disable_cmd} 2>/dev/null || true
-                }
-                uninstall_one "$module" "$target" "$mode" "$source"
-            fi
+        # Look up module from manifest
+        local target mode source
+        while IFS=$'\t' read -r m t mo s; do
+            [[ "$m" == "$mod" ]] && { target="$t"; mode="$mo"; source="$s"; break; }
         done < "$MANIFEST_FILE"
-    else
-        echo "No interactive terminal. Run with --batch or specify modules."
-        exit 1
-    fi
+        [[ -z "$target" ]] && continue
+
+        local cur_state
+        cur_state=$(module_state "$mod" "$target" "$source")
+
+        # Build action list
+        local actions=""
+        case "$cur_state" in
+            "not installed")
+                actions="install"
+                if [[ -n "$(module_enable_cmd "$mod" 2>/dev/null)" ]]; then
+                    actions="${actions}"$'\n'"install + enable"
+                fi
+                ;;
+            *)
+                actions="enable"
+                actions="${actions}"$'\n'"disable"
+                actions="${actions}"$'\n'"update"
+                actions="${actions}"$'\n'"uninstall"
+                ;;
+        esac
+        actions="${actions}"$'\n'"cancel"
+
+        local action
+        action=$(echo "$actions" | fzf \
+            --layout=reverse \
+            --header="Action for ${mod} (${cur_state})" \
+            --bind='esc:abort'
+        ) || continue
+
+        case "$action" in
+            cancel) continue ;;
+            install)
+                install_one "$mod" "$target" "$mode" "$source"
+                ;;
+            "install + enable")
+                install_one "$mod" "$target" "$mode" "$source"
+                local ec
+                ec=$(module_enable_cmd "$mod") && {
+                    echo "Enabling $mod..."
+                    sudo ${ec} 2>/dev/null || echo "(enable deferred — run with sudo later)"
+                }
+                ;;
+            enable)
+                local ec
+                ec=$(module_enable_cmd "$mod") && {
+                    echo "Enabling $mod..."
+                    sudo ${ec} 2>/dev/null || echo "(enable deferred — run with sudo later)"
+                }
+                ;;
+            disable)
+                local dc
+                dc=$(module_disable_cmd "$mod") && {
+                    echo "Disabling $mod..."
+                    sudo ${dc} 2>/dev/null || true
+                }
+                ;;
+            update)
+                install_one "$mod" "$target" "$mode" "$source"
+                ;;
+            uninstall)
+                local dc
+                dc=$(module_disable_cmd "$mod") && {
+                    echo "Disabling $mod..."
+                    sudo ${dc} 2>/dev/null || true
+                }
+                uninstall_one "$mod" "$target" "$mode" "$source"
+                ;;
+        esac
+    done
 }
 
 while (($# > 0)); do
