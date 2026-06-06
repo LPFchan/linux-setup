@@ -740,8 +740,13 @@ cmd_reconfigure() {
             [[ -z "$remote_sha" ]] && remote_sha="-"
 
             if [[ -z "$local_sha" || "$local_sha" == "-" ]]; then
-                local_label="-"
-                status_label="not installed"
+                if [[ -f "$target" ]]; then
+                    local_label="-"
+                    status_label="installed (untracked)"
+                else
+                    local_label="-"
+                    status_label="not installed"
+                fi
             elif [[ "$local_sha" != "$remote_sha" ]]; then
                 local_label="${local_sha:0:7}"
                 status_label="update available"
@@ -750,7 +755,7 @@ cmd_reconfigure() {
                 status_label="up-to-date"
             fi
 
-            [[ -z "$remote_sha" || "$remote_sha" == "—" ]] && remote_label="—" || remote_label="${remote_sha:0:7}"
+            [[ -z "$remote_sha" || "$remote_sha" == "-" ]] && remote_label="-" || remote_label="${remote_sha:0:7}"
 
             if is_service_module "$m"; then
                 local unit; unit=$(module_service_unit "$m")
@@ -763,7 +768,7 @@ cmd_reconfigure() {
                 fi
                 svc+=("$m|${local_label}|${svc_label}|${remote_label}|${status_label}")
             else
-                if [[ -n "$local_sha" && "$local_sha" != "-" ]]; then
+                if [[ (-n "$local_sha" && "$local_sha" != "-") || -f "$target" ]]; then
                     svc_label="installed"
                 else
                     svc_label="uninstalled"
@@ -856,7 +861,9 @@ cmd_reconfigure() {
         has_svc=0
         is_service_module "$mod" && has_svc=1
         local file_installed=0 svc_active=0
-        [[ -n "$got_local_sha" ]] && file_installed=1
+        if [[ -n "$got_local_sha" ]] || [[ -f "$(expand_path "$target")" ]]; then
+            file_installed=1
+        fi
         (( has_svc && file_installed )) && module_is_active "$mod" && svc_active=1
 
         actions=""
