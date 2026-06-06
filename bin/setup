@@ -140,6 +140,7 @@ version_for() {
     while IFS= read -r line; do
         case "$line" in
             '# setup-version: '*) printf '%s\n' "${line#'# setup-version: '}"; return 0 ;;
+            '# linux-setup-version: '*) printf '%s\n' "${line#'# linux-setup-version: '}"; return 0 ;;
         esac
     done < "$file"
 }
@@ -150,6 +151,7 @@ module_for() {
     while IFS= read -r line; do
         case "$line" in
             '# setup-module: '*) printf '%s\n' "${line#'# setup-module: '}"; return 0 ;;
+            '# linux-setup-module: '*) printf '%s\n' "${line#'# linux-setup-module: '}"; return 0 ;;
         esac
     done < "$file"
 }
