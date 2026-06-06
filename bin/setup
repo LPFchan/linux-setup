@@ -548,7 +548,7 @@ cmd_install() {
         if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
             ${ec} 2>&1 || echo "(enable failed — check above for errors)"
         else
-            sudo ${ec} 2>/dev/null || echo "(enable deferred — run 'setup enable $module' with sudo)"
+            sudo ${ec} 2>&1 || echo "(enable failed — run 'setup enable $module' with sudo)"
         fi
     done
 }
@@ -588,9 +588,9 @@ cmd_uninstall() {
                 local dc; dc=$(module_disable_cmd "$module") && {
                     echo "Disabling $module..."
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
-                        ${dc} 2>/dev/null || true
+                        ${dc} 2>&1 || true
                     else
-                        sudo ${dc} 2>/dev/null || true
+                        sudo ${dc} 2>&1 || true
                     fi
                 }
             fi
@@ -815,9 +815,9 @@ cmd_reconfigure() {
                         local dc; dc=$(module_disable_cmd "$m") && {
                             echo "Disabling $m..."
                             if echo " ${USER_SERVICE_MODULES} " | grep -q " ${m} "; then
-                                ${dc} 2>/dev/null || true
+                                ${dc} 2>&1 || true
                             else
-                                sudo ${dc} 2>/dev/null || true
+                                sudo ${dc} 2>&1 || true
                             fi
                         }
                         uninstall_one "$m" "$t" "$mo" "$s"
@@ -869,27 +869,27 @@ cmd_reconfigure() {
                 local ec; ec=$(module_enable_cmd "$mod") && {
                     echo "Enabling $mod..."
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
-                        ${ec} 2>/dev/null || echo "(enable deferred)"
+                        ${ec} 2>&1 || echo "(enable failed — see above)"
                     else
-                        sudo ${ec} 2>/dev/null || echo "(enable deferred)"
+                        sudo ${ec} 2>&1 || echo "(enable failed — see above)"
                     fi
                 } ;;
             enable)
                 local ec; ec=$(module_enable_cmd "$mod") && {
                     echo "Enabling $mod..."
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
-                        ${ec} 2>/dev/null || echo "(enable deferred)"
+                        ${ec} 2>&1 || echo "(enable failed — see above)"
                     else
-                        sudo ${ec} 2>/dev/null || echo "(enable deferred)"
+                        sudo ${ec} 2>&1 || echo "(enable failed — see above)"
                     fi
                 } ;;
             disable)
                 local dc; dc=$(module_disable_cmd "$mod") && {
                     echo "Disabling $mod..."
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
-                        ${dc} 2>/dev/null || true
+                        ${dc} 2>&1 || true
                     else
-                        sudo ${dc} 2>/dev/null || true
+                        sudo ${dc} 2>&1 || true
                     fi
                 } ;;
             update)
@@ -902,9 +902,9 @@ cmd_reconfigure() {
                 local dc; dc=$(module_disable_cmd "$mod") && {
                     echo "Disabling $mod..."
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
-                        ${dc} 2>/dev/null || true
+                        ${dc} 2>&1 || true
                     else
-                        sudo ${dc} 2>/dev/null || true
+                        sudo ${dc} 2>&1 || true
                     fi
                 }
                 uninstall_one "$mod" "$target" "$mode" "$source" ;;
