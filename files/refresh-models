@@ -368,9 +368,7 @@ def cmd_enable():
             cfg["servers"] = existing
             save_json(CONFIG_PATH, cfg)
             print(f"  Added new providers to config: {', '.join(added)}")
-    else:
-        cfg = load_json(CONFIG_PATH)
-        servers = cfg.get("servers", {})
+        servers = existing
         auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
         missing = [s for s in servers if s not in auth_data]
         if missing:
