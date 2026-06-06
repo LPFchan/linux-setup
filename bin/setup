@@ -428,9 +428,7 @@ install_one() {
     if [[ -f "$target" && -n "$old_hash" ]]; then
         current_hash=$(sha256 "$target")
         if [[ "$current_hash" != "$old_hash" && "$FORCE" -ne 1 ]]; then
-            install_target="$target.new"
-            install -m "$mode" "$payload" "$install_target"
-            echo "Local changes detected: wrote $install_target for $module"
+            echo "Local changes detected: skipping $module (use --force to overwrite)"
             rm -f "$payload"
             return 0
         fi
@@ -719,12 +717,12 @@ cmd_reconfigure() {
 
     build_list() {
         # Header: name, local_ver, service, remote_ver, status
-        printf "\e[2m%-14s %-13s %-11s %-13s %-17s\e[0m\n" \
+        printf "%-14s %-13s %-11s %-13s %-17s\n" \
             "module" "local" "service" "remote" "status"
 
         # <ALL MODULES> pseudo-entry
         printf "%-14s %-13s %-11s %-13s %-17s\n" \
-            "<ALL MODULES>" "—" "—" "—" "—"
+            "<ALL MODULES>" "-" "-" "-" "-"
 
         while IFS=$'\t' read -r m t mo s; do
             [[ -z "${m:-}" || "$m" == \#* ]] && continue
@@ -739,10 +737,10 @@ cmd_reconfigure() {
             else
                 remote_sha=$(github_sha_for "$s")
             fi
-            [[ -z "$remote_sha" ]] && remote_sha="—"
+            [[ -z "$remote_sha" ]] && remote_sha="-"
 
-            if [[ -z "$local_sha" || "$local_sha" == "—" ]]; then
-                local_label="—"
+            if [[ -z "$local_sha" || "$local_sha" == "-" ]]; then
+                local_label="-"
                 status_label="not installed"
             elif [[ "$local_sha" != "$remote_sha" ]]; then
                 local_label="${local_sha:0:7}"
@@ -765,7 +763,7 @@ cmd_reconfigure() {
                 fi
                 svc+=("$m|${local_label}|${svc_label}|${remote_label}|${status_label}")
             else
-                if [[ -n "$local_sha" && "$local_sha" != "—" ]]; then
+                if [[ -n "$local_sha" && "$local_sha" != "-" ]]; then
                     svc_label="installed"
                 else
                     svc_label="uninstalled"
@@ -792,8 +790,7 @@ cmd_reconfigure() {
             --layout=reverse --cycle \
             --header="${env_summary}  |  ↑↓=navigate  Enter=actions  Esc=finish" \
             --bind='esc:abort' \
-            --preview-window=hidden \
-            --ansi
+            --preview-window=hidden
         ) || break
 
         mod=$(echo "$selected" | awk '{print $1}')
