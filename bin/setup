@@ -746,19 +746,20 @@ cmd_reconfigure() {
     local env_summary
     env_summary=$(detect_env_summary)
 
-    # Cache remote versions once — eliminates HTTP call per module per redraw
-    declare -A REMOTE_VER
-    while IFS=$'\t' read -r m t mo s; do
-        [[ -z "${m:-}" || "$m" == \#* ]] && continue
-        local p
-        p=$(mktemp)
-        fetch_payload "$s" "$p" 2>/dev/null || true
-        REMOTE_VER["$m"]=$(version_for "$p" || echo "")
-        rm -f "$p"
-    done < "$MANIFEST_FILE"
+    # Cache remote versions (skip if bash <4 — macOS compatibility)
+    if [[ "${BASH_VERSINFO[0]:-0}" -ge 4 ]]; then
+        declare -A REMOTE_VER
+        while IFS=$'\t' read -r m t mo s; do
+            [[ -z "${m:-}" || "$m" == \#* ]] && continue
+            local p
+            p=$(mktemp)
+            fetch_payload "$s" "$p" 2>/dev/null || true
+            REMOTE_VER["$m"]=$(version_for "$p" || echo "")
+            rm -f "$p"
+        done < "$MANIFEST_FILE"
+    fi
 
     build_list() {
-        local -a non_svc svc
         while IFS=$'\t' read -r m t mo s; do
             [[ -z "${m:-}" || "$m" == \#* ]] && continue
             local target local_ver svc_label ver_label
@@ -768,7 +769,7 @@ cmd_reconfigure() {
             local_ver=$(version_for "$target" || true)
             if [[ -z "$local_ver" ]]; then
                 ver_label="—"
-            elif version_gt "${REMOTE_VER["$m"]:-}" "$local_ver"; then
+            elif [[ "${BASH_VERSINFO[0]:-0}" -ge 4 ]] && version_gt "${REMOTE_VER["$m"]:-}" "$local_ver"; then
                 ver_label="${local_ver} → ${REMOTE_VER["$m"]}"
             else
                 ver_label="${local_ver}"
