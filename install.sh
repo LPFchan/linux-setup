@@ -14,7 +14,7 @@ has_path_setup() {
 has_ai_autolaunch() {
     local file="$1"
     [[ -f "$file" ]] || return 1
-    grep -Eq 'ai-start-menu' "$file" \
+    grep -Eq 'ai-menu' "$file" \
         && grep -Eq 'AI_AUTO_LAUNCHED' "$file" \
         && grep -Eq '(^|[^[:alnum:]_])ai([[:space:]]*$|[[:space:]]|;|&&|\|\|)' "$file"
 }
@@ -61,6 +61,14 @@ prepend_block_once() {
 configure_shell() {
     local path_block zsh_ai_block bash_ai_block bash_profile_block
 
+    # Clean up old ai-start-menu references so new ai-menu blocks are written
+    for _f in "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.bashrc"; do
+        if [[ -f "$_f" ]] && grep -q 'ai-start-menu' "$_f" 2>/dev/null; then
+            sed -i '' -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
+            sed -i -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
+        fi
+    done
+
     path_block='case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) export PATH="$HOME/.local/bin:$PATH" ;;
@@ -70,7 +78,7 @@ esac'
 [[ -n ${TERM_PROGRAM-} || -n ${SSH_TTY-} ]] || return
 (( SHLVL > 1 )) && return
 
-[[ -f "$HOME/.bashrc.d/ai-start-menu" ]] && source "$HOME/.bashrc.d/ai-start-menu"
+[[ -f "$HOME/.bashrc.d/ai-menu" ]] && source "$HOME/.bashrc.d/ai-menu"
 if (( ${+functions[ai]} )) && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
     export AI_AUTO_LAUNCHED=1
     ai
@@ -78,7 +86,7 @@ fi'
 
     bash_ai_block='[[ $- == *i* && -t 0 ]] || return
 
-[[ -f "$HOME/.bashrc.d/ai-start-menu" ]] && source "$HOME/.bashrc.d/ai-start-menu"
+[[ -f "$HOME/.bashrc.d/ai-menu" ]] && source "$HOME/.bashrc.d/ai-menu"
 if declare -F ai >/dev/null && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
     export AI_AUTO_LAUNCHED=1
     ai

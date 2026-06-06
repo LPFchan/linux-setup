@@ -1,12 +1,12 @@
 # setup-module: ai-menu
-# setup-source: files/ai-start-menu
+# setup-source: files/ai-menu
 
 ai() {
     local choice current_host
     local -a options ssh_hosts
     current_host=$(hostname)
     local current_aliases=("$current_host" "${current_host%%.*}" "${current_host%%.*}.local")
-    options=(claude codex opencode)
+    options=(claude codex opencode setup)
 
     if [[ -f ~/.ssh/config ]]; then
         ssh_hosts=( $(grep -E "^Host " ~/.ssh/config | awk '{print $2}') )
@@ -32,6 +32,7 @@ ai() {
             fi
             ;;
         opencode) OPENCODE_ENABLE_EXA=1 opencode ;;
+        setup) setup ;;
         resume) resume ;;
         neither|"") ;;
         *) ssh "$choice" ;;
