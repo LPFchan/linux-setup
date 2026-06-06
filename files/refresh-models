@@ -324,10 +324,13 @@ def cmd_enable():
                        capture_output=True)
         r = subprocess.run(["launchctl", "bootstrap", f"gui/{_uid}", plist_path],
                            capture_output=True)
+        if r.returncode == 125:
+            # pre-Ventura: bootstrap not supported in GUI domain, fall back to load
+            r = subprocess.run(["launchctl", "load", plist_path], capture_output=True)
         if r.returncode == 0:
             print("refresh-models launchd agent enabled (hourly)")
         else:
-            print(f"refresh-models installed but launchd bootstrap failed (rc={r.returncode})")
+            print(f"refresh-models installed but launchd enable failed (rc={r.returncode})")
             if r.stderr:
                 print(r.stderr.decode().rstrip(), file=sys.stderr)
     else:
@@ -425,8 +428,10 @@ def cmd_disable():
         plist_path = os.path.join(LAUNCHD_DIR, f"{PLIST_NAME}.plist")
         if os.path.exists(plist_path):
             _uid = os.getuid()
-            subprocess.run(["launchctl", "bootout", f"gui/{_uid}/{PLIST_NAME}"],
-                           capture_output=True)
+            r = subprocess.run(["launchctl", "bootout", f"gui/{_uid}/{PLIST_NAME}"],
+                               capture_output=True)
+            if r.returncode == 125:
+                subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
             os.remove(plist_path)
         print("refresh-models launchd agent disabled")
     else:
