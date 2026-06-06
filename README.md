@@ -1,8 +1,9 @@
-# linux-setup
+# setup
 
-Curl-installable setup files for personal Linux/macOS machines.
+Curl-installable personal Linux/macOS machine setup.
 
 This repo is the source of truth for live scripts and generated config.
+Repo: https://github.com/LPFchan/setup
 
 ## Install
 
