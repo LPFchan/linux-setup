@@ -198,18 +198,60 @@ def refresh_server(name, cfg):
 # --- systemd management ----------------------------------------------
 
 
+LAUNCHD_DIR = os.path.expanduser("~/Library/LaunchAgents")
+PLIST_NAME = "com.lost.plus.refresh-models"
+
+
+def _is_macos():
+    return sys.platform == "darwin"
+
+
 def cmd_enable():
-    pathlib.Path(SERVICE_DIR).mkdir(parents=True, exist_ok=True)
     script_path = os.path.abspath(sys.argv[0])
-    with open(os.path.join(SERVICE_DIR, "refresh-models.service"), "w") as f:
-        f.write(SERVICE_UNIT % script_path)
-    with open(os.path.join(SERVICE_DIR, "refresh-models.timer"), "w") as f:
-        f.write(TIMER_UNIT)
-    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(
-        ["systemctl", "--user", "enable", "--now", "refresh-models.timer"], check=True
-    )
-    print("refresh-models timer enabled (hourly)")
+    cfg_dir = os.path.dirname(CONFIG_PATH)
+    pathlib.Path(cfg_dir).mkdir(parents=True, exist_ok=True)
+
+    if _is_macos():
+        pathlib.Path(LAUNCHD_DIR).mkdir(parents=True, exist_ok=True)
+        plist_path = os.path.join(LAUNCHD_DIR, f"{PLIST_NAME}.plist")
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{PLIST_NAME}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{script_path}</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/tmp/refresh-models.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/refresh-models.log</string>
+</dict>
+</plist>"""
+        with open(plist_path, "w") as f:
+            f.write(plist)
+        subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+        subprocess.run(["launchctl", "load", plist_path], check=True)
+        print("refresh-models launchd agent enabled (hourly)")
+    else:
+        pathlib.Path(SERVICE_DIR).mkdir(parents=True, exist_ok=True)
+        with open(os.path.join(SERVICE_DIR, "refresh-models.service"), "w") as f:
+            f.write(SERVICE_UNIT % script_path)
+        with open(os.path.join(SERVICE_DIR, "refresh-models.timer"), "w") as f:
+            f.write(TIMER_UNIT)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "refresh-models.timer"], check=True
+        )
+        print("refresh-models timer enabled (hourly)")
+
+    # ... (rest stays the same)
 
     cfg_dir = os.path.dirname(CONFIG_PATH)
     pathlib.Path(cfg_dir).mkdir(parents=True, exist_ok=True)
@@ -257,32 +299,53 @@ def cmd_enable():
 
 
 def cmd_disable():
-    subprocess.run(
-        ["systemctl", "--user", "disable", "--now", "refresh-models.timer"],
-        capture_output=True,
-    )
-    for f in ["refresh-models.service", "refresh-models.timer"]:
-        p = os.path.join(SERVICE_DIR, f)
-        if os.path.exists(p):
-            os.remove(p)
-    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    print("refresh-models timer disabled")
+    if _is_macos():
+        plist_path = os.path.join(LAUNCHD_DIR, f"{PLIST_NAME}.plist")
+        if os.path.exists(plist_path):
+            subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+            os.remove(plist_path)
+        print("refresh-models launchd agent disabled")
+    else:
+        subprocess.run(
+            ["systemctl", "--user", "disable", "--now", "refresh-models.timer"],
+            capture_output=True,
+        )
+        for f in ["refresh-models.service", "refresh-models.timer"]:
+            p = os.path.join(SERVICE_DIR, f)
+            if os.path.exists(p):
+                os.remove(p)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        print("refresh-models timer disabled")
 
 
 def cmd_status():
-    result = subprocess.run(
-        ["systemctl", "--user", "is-active", "refresh-models.timer"],
-        capture_output=True, text=True,
-    )
-    state = result.stdout.strip()
-    if state == "active":
-        next_run = subprocess.run(
-            ["systemctl", "--user", "show", "-p", "NextElapseUSecRealtime", "refresh-models.timer"],
-            capture_output=True, text=True,
-        ).stdout.strip().split("=")[-1]
-        print(f"timer: active (next: {next_run})")
+    if _is_macos():
+        plist_path = os.path.join(LAUNCHD_DIR, f"{PLIST_NAME}.plist")
+        if os.path.exists(plist_path):
+            result = subprocess.run(
+                ["launchctl", "list", PLIST_NAME],
+                capture_output=True, text=True,
+            )
+            if PLIST_NAME in result.stdout:
+                print("timer: active (launchd hourly)")
+            else:
+                print("timer: not loaded")
+        else:
+            print("timer: not installed")
     else:
-        print(f"timer: {state}")
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", "refresh-models.timer"],
+            capture_output=True, text=True,
+        )
+        state = result.stdout.strip()
+        if state == "active":
+            next_run = subprocess.run(
+                ["systemctl", "--user", "show", "-p", "NextElapseUSecRealtime", "refresh-models.timer"],
+                capture_output=True, text=True,
+            ).stdout.strip().split("=")[-1]
+            print(f"timer: active (next: {next_run})")
+        else:
+            print(f"timer: {state}")
     cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
     servers = cfg.get("servers", {})
     print(f"servers configured: {len(servers)}")

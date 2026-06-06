@@ -577,7 +577,7 @@ cmd_install() {
         local ec; ec=$(module_enable_cmd "$module")
         echo "Enabling $module..."
         if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
-            ${ec} 2>/dev/null || echo "(enable deferred — run 'setup enable $module')"
+            ${ec} 2>&1 || echo "(enable failed — check above for errors)"
         else
             sudo ${ec} 2>/dev/null || echo "(enable deferred — run 'setup enable $module' with sudo)"
         fi
