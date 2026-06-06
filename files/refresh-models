@@ -210,15 +210,50 @@ def cmd_enable():
         ["systemctl", "--user", "enable", "--now", "refresh-models.timer"], check=True
     )
     print("refresh-models timer enabled (hourly)")
-    cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
-    if not cfg.get("servers"):
+
+    cfg_dir = os.path.dirname(CONFIG_PATH)
+    pathlib.Path(cfg_dir).mkdir(parents=True, exist_ok=True)
+
+    if not os.path.exists(CONFIG_PATH):
+        default_config = {
+            "servers": {
+                "grimoire": {
+                    "baseURL": "http://localhost:9001/v1",
+                    "api_format": "grimoire",
+                    "npm": "@ai-sdk/openai-compatible",
+                    "auth": {"type": "auth_json", "provider": "grimoire"},
+                },
+                "crofai": {
+                    "baseURL": "https://crof.ai/v1",
+                    "api_format": "crofai",
+                    "npm": "@ai-sdk/openai-compatible",
+                    "auth": {"type": "auth_json", "provider": "crofai"},
+                },
+                "commandcode": {
+                    "baseURL": "https://api.commandcode.ai/provider/v1",
+                    "api_format": "openai",
+                    "npm": "@ai-sdk/openai-compatible",
+                    "auth": {"type": "auth_json", "provider": "commandcode"},
+                },
+            }
+        }
+        save_json(CONFIG_PATH, default_config)
+        print(f"  Wrote default config to {CONFIG_PATH}")
         print()
-        print("No servers configured. Edit ~/.config/opencode/refresh-models.json")
-        print()
-        print("For each provider, add credentials to ~/.local/share/opencode/auth.json:")
-        print("  Get your API key from the provider's dashboard.")
-        print("  Example auth.json entry:")
+        print("  For each provider, add API keys to ~/.local/share/opencode/auth.json:")
         print('  { "commandcode": { "type": "api", "key": "<your-key>" } }')
+        print('  { "grimoire":     { "type": "api", "key": "<your-key>" } }')
+        print('  { "crofai":       { "type": "api", "key": "<your-key>" } }')
+    else:
+        cfg = load_json(CONFIG_PATH)
+        servers = cfg.get("servers", {})
+        missing = [s for s in servers if not os.path.exists(AUTH_PATH) or s not in (load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {})]
+        if missing:
+            print()
+            print(f"  Auth missing for: {', '.join(missing)}")
+            print("  Add API keys to ~/.local/share/opencode/auth.json:")
+            for s in missing:
+                print(f'  {{ "{s}": {{ "type": "api", "key": "<your-key>" }} }}')
 
 
 def cmd_disable():
