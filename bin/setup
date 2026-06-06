@@ -12,7 +12,8 @@ MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 HASH_FILE="$STATE_DIR/installed.tsv"
 FORCE=0
 
-SERVICE_MODULES="kernel-simmer service-ctl gpu-fancontrol monitoring backup"
+SERVICE_MODULES="kernel-simmer service-ctl gpu-fancontrol monitoring refresh-models backup"
+USER_SERVICE_MODULES="refresh-models"
 BATCH=0
 
 usage() {
@@ -46,6 +47,7 @@ module_enable_cmd() {
         service-ctl)    echo "service-ctl enable --all" ;;
         gpu-fancontrol|monitoring)
                         echo "service-ctl enable $1" ;;
+        refresh-models) echo "refresh-models enable" ;;
         backup)         echo "backup enable" ;;
     esac
 }
@@ -56,6 +58,7 @@ module_disable_cmd() {
         service-ctl)    echo "service-ctl disable --all" ;;
         gpu-fancontrol|monitoring)
                         echo "service-ctl disable $1" ;;
+        refresh-models) echo "refresh-models disable" ;;
         backup)         echo "backup disable" ;;
     esac
 }
@@ -66,6 +69,7 @@ module_service_unit() {
         kernel-simmer)  echo "kernel-simmer.timer" ;;
         gpu-fancontrol) echo "gpu-fancontrol.service" ;;
         monitoring)     echo "monitoring.service" ;;
+        refresh-models) echo "refresh-models.timer" ;;
         backup)         echo "backup-daily.timer" ;;
     esac
 }
@@ -77,9 +81,12 @@ is_service_module() {
 }
 
 module_is_active() {
-    local unit
+    local unit user_flag=""
     unit=$(module_service_unit "$1") || return 1
-    [[ "$(systemctl is-active "${unit}" 2>/dev/null)" == "active" ]]
+    if echo " ${USER_SERVICE_MODULES} " | grep -q " $1 "; then
+        user_flag="--user"
+    fi
+    [[ "$(systemctl ${user_flag} is-active "${unit}" 2>/dev/null)" == "active" ]]
 }
 
 sha256() {
@@ -569,7 +576,11 @@ cmd_install() {
         is_service_module "$module" || continue
         local ec; ec=$(module_enable_cmd "$module")
         echo "Enabling $module..."
-        sudo ${ec} 2>/dev/null || echo "(enable deferred — run 'setup enable $module' with sudo)"
+        if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
+            ${ec} 2>/dev/null || echo "(enable deferred — run 'setup enable $module')"
+        else
+            sudo ${ec} 2>/dev/null || echo "(enable deferred — run 'setup enable $module' with sudo)"
+        fi
     done
 }
 
@@ -607,7 +618,11 @@ cmd_uninstall() {
             if (($# > 0)); then
                 local dc; dc=$(module_disable_cmd "$module") && {
                     echo "Disabling $module..."
-                    sudo ${dc} 2>/dev/null || true
+                    if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
+                        ${dc} 2>/dev/null || true
+                    else
+                        sudo ${dc} 2>/dev/null || true
+                    fi
                 }
             fi
             uninstall_one "$module" "$target" "$mode" "$source"
@@ -649,7 +664,11 @@ cmd_enable() {
         is_service_module "$module" || { echo "Not a service module: $module" >&2; continue; }
         local cmd; cmd=$(module_enable_cmd "$module")
         echo "Enabling $module..."
-        sudo ${cmd}
+        if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
+            ${cmd}
+        else
+            sudo ${cmd}
+        fi
     done
 }
 
@@ -660,7 +679,11 @@ cmd_disable() {
         is_service_module "$module" || { echo "Not a service module: $module" >&2; continue; }
         local cmd; cmd=$(module_disable_cmd "$module")
         echo "Disabling $module..."
-        sudo ${cmd}
+        if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
+            ${cmd}
+        else
+            sudo ${cmd}
+        fi
     done
 }
 
@@ -834,17 +857,29 @@ cmd_reconfigure() {
                 install_one "$mod" "$target" "$mode" "$source"
                 local ec; ec=$(module_enable_cmd "$mod") && {
                     echo "Enabling $mod..."
-                    sudo ${ec} 2>/dev/null || echo "(enable deferred)"
+                    if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
+                        ${ec} 2>/dev/null || echo "(enable deferred)"
+                    else
+                        sudo ${ec} 2>/dev/null || echo "(enable deferred)"
+                    fi
                 } ;;
             enable)
                 local ec; ec=$(module_enable_cmd "$mod") && {
                     echo "Enabling $mod..."
-                    sudo ${ec} 2>/dev/null || echo "(enable deferred)"
+                    if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
+                        ${ec} 2>/dev/null || echo "(enable deferred)"
+                    else
+                        sudo ${ec} 2>/dev/null || echo "(enable deferred)"
+                    fi
                 } ;;
             disable)
                 local dc; dc=$(module_disable_cmd "$mod") && {
                     echo "Disabling $mod..."
-                    sudo ${dc} 2>/dev/null || true
+                    if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
+                        ${dc} 2>/dev/null || true
+                    else
+                        sudo ${dc} 2>/dev/null || true
+                    fi
                 } ;;
             update)
                 install_one "$mod" "$target" "$mode" "$source" ;;
@@ -855,7 +890,11 @@ cmd_reconfigure() {
             uninstall)
                 local dc; dc=$(module_disable_cmd "$mod") && {
                     echo "Disabling $mod..."
-                    sudo ${dc} 2>/dev/null || true
+                    if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
+                        ${dc} 2>/dev/null || true
+                    else
+                        sudo ${dc} 2>/dev/null || true
+                    fi
                 }
                 uninstall_one "$mod" "$target" "$mode" "$source" ;;
         esac

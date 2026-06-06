@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+# linux-setup-module: refresh-models
+# linux-setup-version: 2026.06.06.1
+# linux-setup-source: files/refresh-models
+"""refresh-models — probe /v1/models endpoints and update opencode.json provider blocks.
+
+Commands:
+  (no args)        Refresh all configured servers
+  <server>         Refresh a single server by name
+  --list           List configured server names
+  enable           Install systemd user timer (runs hourly)
+  disable          Remove systemd user timer
+  status           Show timer state and next run
+"""
+
+import json, os, sys, urllib.request, urllib.error, subprocess, pathlib
+
+CONFIG_PATH = os.path.expanduser("~/.config/opencode/refresh-models.json")
+OPENCODE_PATH = os.path.expanduser("~/.config/opencode/opencode.json")
+AUTH_PATH = os.path.expanduser("~/.local/share/opencode/auth.json")
+SERVICE_DIR = os.path.expanduser("~/.config/systemd/user")
+
+SERVICE_UNIT = """[Unit]
+Description=Refresh opencode model list from configured providers
+
+[Service]
+Type=oneshot
+ExecStart=%s
+"""
+
+TIMER_UNIT = """[Unit]
+Description=Hourly refresh-models check
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def load_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+
+def get_auth(auth_cfg):
+    if auth_cfg is None:
+        return None, None
+    atype = auth_cfg.get("type")
+    if atype == "auth_json":
+        provider = auth_cfg.get("provider")
+        auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
+        entry = auth_data.get(provider, {})
+        if entry.get("type") == "api":
+            return "api_key", entry["key"]
+        elif entry.get("type") == "oauth":
+            return "bearer", entry.get("access")
+    elif atype == "api_key":
+        return "api_key", auth_cfg["key"]
+    elif atype == "bearer":
+        return "bearer", auth_cfg["key"]
+    return None, None
+
+
+def as_number(value, default=0):
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def as_int(value, default):
+    number = as_number(value, default)
+    try:
+        return int(number)
+    except (TypeError, ValueError):
+        return default
+
+
+def fetch_models(base_url, auth_cfg):
+    url = base_url.rstrip("/") + "/models"
+    req = urllib.request.Request(url)
+    req.add_header("Accept", "application/json")
+    req.add_header("User-Agent", "refresh-models/1.0")
+    auth_type, auth_val = get_auth(auth_cfg)
+    if auth_type in ("api_key", "bearer"):
+        req.add_header("Authorization", f"Bearer {auth_val}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        print(f"  HTTP {e.code} fetching {url}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"  Error fetching {url}: {e}", file=sys.stderr)
+        return None
+
+
+def model_to_config_grimoire(m):
+    cost = m.get("cost", {})
+    return {
+        "limit": {
+            "context": as_int(m.get("context"), 32768),
+            "output": as_int(m.get("output"), 16384),
+        },
+        "cost": {
+            "input": as_number(cost.get("input")),
+            "output": as_number(cost.get("output")),
+            "cache_read": as_number(cost.get("cache_read")),
+        },
+    }
+
+
+def model_to_config_crofai(m):
+    pricing = m.get("pricing", {})
+    return {
+        "limit": {
+            "context": as_int(m.get("context_length"), 32768),
+            "output": as_int(m.get("max_completion_tokens"), 16384),
+        },
+        "cost": {
+            "input": as_number(pricing.get("prompt")),
+            "output": as_number(pricing.get("completion")),
+            "cache_read": as_number(pricing.get("cache_prompt")),
+        },
+    }
+
+
+def model_to_config_openai(m):
+    return {
+        "limit": {
+            "context": m.get("context_length", 32768),
+            "output": m.get("max_completion_tokens", 16384),
+        },
+        "cost": {"input": 0, "output": 0, "cache_read": 0},
+    }
+
+
+FORMAT_HANDLERS = {
+    "grimoire": model_to_config_grimoire,
+    "crofai": model_to_config_crofai,
+    "openai": model_to_config_openai,
+}
+
+
+def refresh_server(name, cfg):
+    base_url = cfg["baseURL"]
+    fmt = cfg.get("api_format", "openai")
+    handler = FORMAT_HANDLERS.get(fmt, FORMAT_HANDLERS["openai"])
+    npm = cfg.get("npm", "@ai-sdk/openai-compatible")
+    print(f"  {name} ({base_url}) ...", file=sys.stderr)
+    resp = fetch_models(base_url, cfg.get("auth"))
+    if resp is None:
+        return False
+    models_list = resp.get("data", resp.get("models", []))
+    if not models_list:
+        print(f"  Warning: no models returned for {name}", file=sys.stderr)
+        return False
+    models = {}
+    for m in models_list:
+        model_id = m.get("id", "")
+        if not model_id:
+            continue
+        models[model_id] = handler(m)
+    opencode = load_json(OPENCODE_PATH) if os.path.exists(OPENCODE_PATH) else {}
+    provider_block = opencode.get("provider", {})
+    existing = provider_block.setdefault(name, {})
+    existing["npm"] = npm
+    existing["name"] = name
+    if "options" not in existing:
+        existing["options"] = {"baseURL": base_url}
+    else:
+        existing["options"]["baseURL"] = base_url
+    existing["models"] = models
+    provider_block[name] = existing
+    opencode["provider"] = provider_block
+    save_json(OPENCODE_PATH, opencode)
+    jsonc_path = OPENCODE_PATH.replace(".json", ".jsonc")
+    if jsonc_path != OPENCODE_PATH and os.path.exists(jsonc_path):
+        os.remove(jsonc_path)
+        print(f"  Removed stale {os.path.basename(jsonc_path)}", file=sys.stderr)
+    print(f"  {name}: {len(models)} models updated", file=sys.stderr)
+    return True
+
+
+# --- systemd management ----------------------------------------------
+
+
+def cmd_enable():
+    pathlib.Path(SERVICE_DIR).mkdir(parents=True, exist_ok=True)
+    script_path = os.path.abspath(sys.argv[0])
+    with open(os.path.join(SERVICE_DIR, "refresh-models.service"), "w") as f:
+        f.write(SERVICE_UNIT % script_path)
+    with open(os.path.join(SERVICE_DIR, "refresh-models.timer"), "w") as f:
+        f.write(TIMER_UNIT)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+    subprocess.run(
+        ["systemctl", "--user", "enable", "--now", "refresh-models.timer"], check=True
+    )
+    print("refresh-models timer enabled (hourly)")
+    cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
+    if not cfg.get("servers"):
+        print()
+        print("No servers configured. Edit ~/.config/opencode/refresh-models.json")
+        print()
+        print("For each provider, add credentials to ~/.local/share/opencode/auth.json:")
+        print("  Get your API key from the provider's dashboard.")
+        print("  Example auth.json entry:")
+        print('  { "commandcode": { "type": "api", "key": "<your-key>" } }')
+
+
+def cmd_disable():
+    subprocess.run(
+        ["systemctl", "--user", "disable", "--now", "refresh-models.timer"],
+        capture_output=True,
+    )
+    for f in ["refresh-models.service", "refresh-models.timer"]:
+        p = os.path.join(SERVICE_DIR, f)
+        if os.path.exists(p):
+            os.remove(p)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+    print("refresh-models timer disabled")
+
+
+def cmd_status():
+    result = subprocess.run(
+        ["systemctl", "--user", "is-active", "refresh-models.timer"],
+        capture_output=True, text=True,
+    )
+    state = result.stdout.strip()
+    if state == "active":
+        next_run = subprocess.run(
+            ["systemctl", "--user", "show", "-p", "NextElapseUSecRealtime", "refresh-models.timer"],
+            capture_output=True, text=True,
+        ).stdout.strip().split("=")[-1]
+        print(f"timer: active (next: {next_run})")
+    else:
+        print(f"timer: {state}")
+    cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
+    servers = cfg.get("servers", {})
+    print(f"servers configured: {len(servers)}")
+    for name in servers:
+        print(f"  {name}: {servers[name].get('baseURL')}")
+
+
+# --- main -------------------------------------------------------------
+
+
+def main():
+    args = sys.argv[1:]
+
+    if not args:
+        cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {}
+        servers = cfg.get("servers", {})
+        for name, srv_cfg in servers.items():
+            refresh_server(name, srv_cfg)
+        return
+
+    cmd = args[0]
+
+    if cmd == "--list":
+        cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
+        for name in cfg.get("servers", {}):
+            print(name)
+        return
+
+    if cmd == "enable":
+        cmd_enable()
+        return
+
+    if cmd == "disable":
+        cmd_disable()
+        return
+
+    if cmd == "status":
+        cmd_status()
+        return
+
+    # Assume it's a server name
+    cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {}
+    servers = cfg.get("servers", {})
+    if cmd in servers:
+        refresh_server(cmd, servers[cmd])
+        return
+
+    print(f"Unknown: {cmd}", file=sys.stderr)
+    print(f"Usage: refresh-models [enable|disable|status|--list|<server>]", file=sys.stderr)
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
