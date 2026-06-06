@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup-module: setup
 # setup-source: bin/setup
-set -euo pipefail
+set -uo pipefail
 
 BASE_URL="${LINUX_SETUP_BASE_URL:-https://setup.lost.plus}"
 FALLBACK_URL="${LINUX_SETUP_FALLBACK_URL:-https://raw.githubusercontent.com/LPFchan/setup/main}"
@@ -106,10 +106,11 @@ expand_path() {
 
 fetch_manifest() {
     mkdir -p "$STATE_DIR"
-    if ! curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" \
-        || ! grep -q '^# module' "$MANIFEST_FILE"; then
-        curl -fsSL "$FALLBACK_URL/manifest.tsv" -o "$MANIFEST_FILE"
+    if curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" 2>/dev/null \
+        && grep -q '^# module' "$MANIFEST_FILE"; then
+        return 0
     fi
+    curl -fsSL "$FALLBACK_URL/manifest.tsv" -o "$MANIFEST_FILE" 2>/dev/null || true
 }
 
 module_selected() {
@@ -707,8 +708,8 @@ detect_env_summary() {
 }
 
 cmd_reconfigure() {
-    configure_shell
-    fetch_manifest
+    configure_shell || true
+    fetch_manifest || true
     local env_summary
     env_summary=$(detect_env_summary)
 
