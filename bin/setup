@@ -14,7 +14,6 @@ FORCE=0
 SERVICE_MODULES="kernel-simmer service-ctl gpu-fancontrol monitoring refresh-models backup"
 USER_SERVICE_MODULES="refresh-models"
 BATCH=0
-ORIG_ARGS=("$@")
 
 usage() {
     cat <<'EOF'
@@ -448,7 +447,7 @@ install_one() {
         fi
         if [[ "$module" == "setup" ]]; then
             echo "Restarting setup..."
-            exec "$target" "${ORIG_ARGS[@]}"
+            exec "$target"
         fi
         return 0
     fi
@@ -470,7 +469,7 @@ install_one() {
     rm -f "$payload"
     if [[ "$module" == "setup" ]]; then
         echo "Restarting setup..."
-        exec "$target" "${ORIG_ARGS[@]}"
+        exec "$target"
     fi
 }
 
