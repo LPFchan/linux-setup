@@ -61,9 +61,9 @@ prepend_block_once() {
 configure_shell() {
     local path_block zsh_ai_block bash_ai_block bash_profile_block
 
-    # Clean up old ai-start-menu managed blocks so new ai-menu blocks are written
+    # Remove stale ai managed blocks so fresh ones with ai-menu path are written
     for _f in "$HOME/.zshrc" "$HOME/.bashrc"; do
-        if [[ -f "$_f" ]] && grep -q 'ai-start-menu' "$_f" 2>/dev/null; then
+        if [[ -f "$_f" ]] && grep -qE 'linux-setup:(zsh-ai|bash-ai)' "$_f" 2>/dev/null; then
             _tmp=$(mktemp)
             awk '
                 /^# >>> linux-setup:zsh-ai >>>/   { skip=1; next }
