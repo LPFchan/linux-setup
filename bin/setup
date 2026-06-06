@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # setup-module: setup
-# setup-version: 2026.06.06.1
+# setup-version: 2026.06.06.2
 # setup-source: bin/setup
 set -euo pipefail
 
