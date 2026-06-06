@@ -718,7 +718,12 @@ detect_env_summary() {
     else
         distro="${os}"
     fi
-    fs=$(stat -f -c '%T' / 2>/dev/null || echo "unknown")
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        fs=$(diskutil info / 2>/dev/null | awk '/File System/ {print $3}' || true)
+        [[ -z "$fs" ]] && fs="unknown"
+    else
+        fs=$(stat -f -c '%T' / 2>/dev/null || echo "unknown")
+    fi
     echo "${os} ${arch} · ${distro} · ${fs}"
 }
 
