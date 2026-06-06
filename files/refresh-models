@@ -206,7 +206,51 @@ def _is_macos():
     return sys.platform == "darwin"
 
 
+PROVIDER_URLS = {
+    "grimoire": "http://localhost:9001 (self-hosted, no key needed if open)",
+    "crofai": "https://crof.ai",
+    "commandcode": "https://commandcode.ai/studio → Settings → API Keys",
+    "deepseek": "https://platform.deepseek.com/api_keys",
+}
+
+
+def cmd_auth():
+    """Show missing API keys and how to add them."""
+    cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
+    servers = cfg.get("servers", {})
+    auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
+
+    missing = [s for s in servers if s not in auth_data]
+    configured = [s for s in servers if s in auth_data]
+
+    if configured:
+        print("Configured:")
+        for s in configured:
+            print(f"  {s}: ✓")
+    if not missing:
+        print("All providers have API keys in auth.json.")
+        return
+
+    print()
+    print("Missing API keys:")
+    for s in missing:
+        url = PROVIDER_URLS.get(s, f"https://{s}.com")
+        print(f"  {s}")
+        print(f"    Get key: {url}")
+        print()
+
+    print(f"Add to {AUTH_PATH}:")
+    print("{")
+    for i, s in enumerate(missing):
+        comma = "," if i < len(missing) - 1 else ""
+        print(f'  "{s}": {{"type": "api", "key": "<your-key>"}}{comma}')
+    print("}")
+
+
 def cmd_enable():
+    ...
+    (keep the existing enable logic but update the auth missing message)
+    ...
     script_path = os.path.abspath(sys.argv[0])
     cfg_dir = os.path.dirname(CONFIG_PATH)
     pathlib.Path(cfg_dir).mkdir(parents=True, exist_ok=True)
@@ -257,45 +301,59 @@ def cmd_enable():
     pathlib.Path(cfg_dir).mkdir(parents=True, exist_ok=True)
 
     if not os.path.exists(CONFIG_PATH):
-        default_config = {
-            "servers": {
-                "grimoire": {
-                    "baseURL": "http://localhost:9001/v1",
-                    "api_format": "grimoire",
-                    "npm": "@ai-sdk/openai-compatible",
-                    "auth": {"type": "auth_json", "provider": "grimoire"},
-                },
-                "crofai": {
-                    "baseURL": "https://crof.ai/v1",
-                    "api_format": "crofai",
-                    "npm": "@ai-sdk/openai-compatible",
-                    "auth": {"type": "auth_json", "provider": "crofai"},
-                },
-                "commandcode": {
-                    "baseURL": "https://api.commandcode.ai/provider/v1",
-                    "api_format": "openai",
-                    "npm": "@ai-sdk/openai-compatible",
-                    "auth": {"type": "auth_json", "provider": "commandcode"},
-                },
-            }
+    default_config = {
+        "servers": {
+            "grimoire": {
+                "baseURL": "http://localhost:9001/v1",
+                "api_format": "grimoire",
+                "npm": "@ai-sdk/openai-compatible",
+                "auth": {"type": "auth_json", "provider": "grimoire"},
+            },
+            "crofai": {
+                "baseURL": "https://crof.ai/v1",
+                "api_format": "crofai",
+                "npm": "@ai-sdk/openai-compatible",
+                "auth": {"type": "auth_json", "provider": "crofai"},
+            },
+            "commandcode": {
+                "baseURL": "https://api.commandcode.ai/provider/v1",
+                "api_format": "openai",
+                "npm": "@ai-sdk/openai-compatible",
+                "auth": {"type": "auth_json", "provider": "commandcode"},
+            },
         }
+    }
+
+    if not os.path.exists(CONFIG_PATH):
         save_json(CONFIG_PATH, default_config)
         print(f"  Wrote default config to {CONFIG_PATH}")
-        print()
-        print("  For each provider, add API keys to ~/.local/share/opencode/auth.json:")
-        print('  { "commandcode": { "type": "api", "key": "<your-key>" } }')
-        print('  { "grimoire":     { "type": "api", "key": "<your-key>" } }')
-        print('  { "crofai":       { "type": "api", "key": "<your-key>" } }')
+    else:
+        cfg = load_json(CONFIG_PATH)
+        existing = cfg.get("servers", {})
+        added = []
+        for name, srv in default_config["servers"].items():
+            if name not in existing:
+                existing[name] = srv
+                added.append(name)
+        if added:
+            cfg["servers"] = existing
+            save_json(CONFIG_PATH, cfg)
+            print(f"  Added new providers to config: {', '.join(added)}")
     else:
         cfg = load_json(CONFIG_PATH)
         servers = cfg.get("servers", {})
-        missing = [s for s in servers if not os.path.exists(AUTH_PATH) or s not in (load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {})]
+        auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
+        missing = [s for s in servers if s not in auth_data]
         if missing:
             print()
-            print(f"  Auth missing for: {', '.join(missing)}")
-            print("  Add API keys to ~/.local/share/opencode/auth.json:")
+            print("  Missing API keys in auth.json:")
             for s in missing:
-                print(f'  {{ "{s}": {{ "type": "api", "key": "<your-key>" }} }}')
+                url = PROVIDER_URLS.get(s, "")
+                print(f"    {s}" + (f" — {url}" if url else ""))
+            print()
+            print(f"  Add to {AUTH_PATH}:")
+            for s in missing:
+                print(f'    "{s}": {{"type": "api", "key": "<your-key>"}}')
 
 
 def cmd_disable():
@@ -386,6 +444,10 @@ def main():
         cmd_status()
         return
 
+    if cmd == "auth":
+        cmd_auth()
+        return
+
     # Assume it's a server name
     cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {}
     servers = cfg.get("servers", {})
@@ -394,7 +456,7 @@ def main():
         return
 
     print(f"Unknown: {cmd}", file=sys.stderr)
-    print(f"Usage: refresh-models [enable|disable|status|--list|<server>]", file=sys.stderr)
+    print(f"Usage: refresh-models [enable|disable|status|auth|--list|<server>]", file=sys.stderr)
     sys.exit(1)
 
 
