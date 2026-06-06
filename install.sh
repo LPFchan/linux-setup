@@ -74,6 +74,7 @@ configure_shell() {
             ' "$_f" > "$_tmp" && mv "$_tmp" "$_f"
         fi
     done
+    rm -f "$HOME/.bashrc.d/ai-start-menu"
 
     path_block='case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
