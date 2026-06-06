@@ -163,6 +163,22 @@ remote_checksum() {
     printf '%s\n' "${_CSUM_CACHE:-}" | grep "^${source}"$'\t' | head -1 | cut -f2
 }
 
+_migrate_ai_menu() {
+    rm -f "$HOME/.bashrc.d/ai-start-menu"
+    for _f in "$HOME/.zshrc" "$HOME/.bashrc"; do
+        if [[ -f "$_f" ]] && grep -qE 'linux-setup:(zsh-ai|bash-ai)' "$_f" 2>/dev/null; then
+            _tmp=$(mktemp)
+            awk '
+                /^# >>> linux-setup:zsh-ai >>>/   { skip=1; next }
+                /^# >>> linux-setup:bash-ai >>>/  { skip=1; next }
+                /^# <<< linux-setup:zsh-ai <<</   { skip=0; next }
+                /^# <<< linux-setup:bash-ai <<</  { skip=0; next }
+                !skip { print }
+            ' "$_f" > "$_tmp" && mv "$_tmp" "$_f"
+        fi
+    done
+}
+
 module_for() {
     local file="$1"
     [[ -f "$file" ]] || return 0
@@ -238,20 +254,7 @@ prepend_block_once() {
 configure_shell() {
     local path_block zsh_ai_block bash_ai_block bash_profile_block
 
-    # Remove stale ai managed blocks so fresh ones with ai-menu path are written
-    for _f in "$HOME/.zshrc" "$HOME/.bashrc"; do
-        if [[ -f "$_f" ]] && grep -qE 'linux-setup:(zsh-ai|bash-ai)' "$_f" 2>/dev/null; then
-            _tmp=$(mktemp)
-            awk '
-                /^# >>> linux-setup:zsh-ai >>>/   { skip=1; next }
-                /^# >>> linux-setup:bash-ai >>>/  { skip=1; next }
-                /^# <<< linux-setup:zsh-ai <<</   { skip=0; next }
-                /^# <<< linux-setup:bash-ai <<</  { skip=0; next }
-                !skip { print }
-            ' "$_f" > "$_tmp" && mv "$_tmp" "$_f"
-        fi
-    done
-    rm -f "$HOME/.bashrc.d/ai-start-menu"
+    _migrate_ai_menu
 
     path_block='case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
@@ -433,6 +436,10 @@ install_one() {
     old_hash=$(installed_hash_for "$target" || true)
 
     if [[ -f "$target" && -n "$old_hash" ]] && [[ "$new_hash" == "$old_hash" ]] && [[ "$FORCE" -ne 1 ]]; then
+        # Run one-time migration even when file is current
+        if [[ "$module" == "ai-menu" ]]; then
+            _migrate_ai_menu
+        fi
         echo "Current $module -> $target"
         rm -f "$payload"
         return 0
@@ -446,19 +453,7 @@ install_one() {
         echo "Replaced foreign file: $module -> $target"
         rm -f "$payload"
         if [[ "$module" == "ai-menu" ]]; then
-            rm -f "$HOME/.bashrc.d/ai-start-menu"
-            for _f in "$HOME/.zshrc" "$HOME/.bashrc"; do
-                if [[ -f "$_f" ]] && grep -qE 'linux-setup:(zsh-ai|bash-ai)' "$_f" 2>/dev/null; then
-                    _tmp=$(mktemp)
-                    awk '
-                        /^# >>> linux-setup:zsh-ai >>>/   { skip=1; next }
-                        /^# >>> linux-setup:bash-ai >>>/  { skip=1; next }
-                        /^# <<< linux-setup:zsh-ai <<</   { skip=0; next }
-                        /^# <<< linux-setup:bash-ai <<</  { skip=0; next }
-                        !skip { print }
-                    ' "$_f" > "$_tmp" && mv "$_tmp" "$_f"
-                fi
-            done
+            _migrate_ai_menu
         fi
         if [[ "$module" == "setup" ]]; then
             echo "Restarting setup..."
