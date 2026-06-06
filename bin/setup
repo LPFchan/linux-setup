@@ -762,20 +762,41 @@ cmd_reconfigure() {
     fi
 
     build_list() {
+        # Header: name, local_ver, service, remote_ver, status
+        printf "\e[2m%-14s %-13s %-11s %-13s %-17s\e[0m\n" \
+            "module" "local" "service" "remote" "status"
+
+        # <ALL MODULES> pseudo-entry
+        printf "%-14s %-13s %-11s %-13s %-17s\n" \
+            "<ALL MODULES>" "—" "—" "—" "—"
+
         while IFS=$'\t' read -r m t mo s; do
             [[ -z "${m:-}" || "$m" == \#* ]] && continue
-            local target local_ver svc_label ver_label
+            local target local_ver remote_ver \
+                   svc_label local_label remote_label status_label
 
             target=$(expand_path "$t")
-
             local_ver=$(version_for "$target" || true)
-            if [[ -z "$local_ver" ]]; then
-                ver_label="—"
-            elif [[ "${BASH_VERSINFO[0]:-0}" -ge 4 ]] && version_gt "${REMOTE_VER["$m"]:-}" "$local_ver"; then
-                ver_label="${local_ver} → ${REMOTE_VER["$m"]}"
+
+            if [[ "${BASH_VERSINFO[0]:-0}" -ge 4 ]]; then
+                remote_ver="${REMOTE_VER["$m"]:-}"
             else
-                ver_label="${local_ver}"
+                remote_ver=""
             fi
+            [[ -z "$remote_ver" ]] && remote_ver="—"
+
+            if [[ -z "$local_ver" ]]; then
+                local_label="—"
+                status_label="not installed"
+            elif [[ -n "${remote_ver//—/}" ]] && version_gt "${remote_ver}" "$local_ver"; then
+                local_label="$local_ver"
+                status_label="update available"
+            else
+                local_label="$local_ver"
+                status_label="up-to-date"
+            fi
+
+            [[ -z "$remote_ver" || "$remote_ver" == "—" ]] && remote_label="—" || remote_label="$remote_ver"
 
             if is_service_module "$m"; then
                 local unit; unit=$(module_service_unit "$m")
@@ -786,14 +807,14 @@ cmd_reconfigure() {
                 else
                     svc_label="inactive"
                 fi
-                svc+=("$m|${ver_label}|${svc_label}")
+                svc+=("$m|${local_label}|${svc_label}|${remote_label}|${status_label}")
             else
                 if [[ -n "$local_ver" ]]; then
                     svc_label="installed"
                 else
                     svc_label="uninstalled"
                 fi
-                non_svc+=("$m|${ver_label}|${svc_label}")
+                non_svc+=("$m|${local_label}|${svc_label}|${remote_label}|${status_label}")
             fi
         done < "$MANIFEST_FILE"
 
@@ -803,32 +824,74 @@ cmd_reconfigure() {
 
         # Print non-service first, then service
         for entry in "${non_svc[@]}" "${svc[@]}"; do
-            IFS='|' read -r m v s <<< "$entry"
-            printf "%-20s %-25s %s\n" "$m" "$v" "$s"
-    done
-
-    # Post-reconfigure: check if refresh-models needs auth onboarding
-    local auth_marker="$STATE_DIR/refresh-models.needs-auth"
-    if [[ -f "$auth_marker" ]]; then
-        echo
-        echo "refresh-models is installed but needs API keys. Launching auth..."
-        rm -f "$auth_marker"
-        refresh-models auth
-    fi
-}
+            IFS='|' read -r m l s r u <<< "$entry"
+            printf "%-14s %-13s %-11s %-13s %-17s\n" "$m" "$l" "$s" "$r" "$u"
+        done
+    }
 
     while true; do
-        local selected mod target mode source cur_state action actions has_svc
+        local selected mod target mode source action actions has_svc
 
         selected=$(build_list | fzf \
             --layout=reverse --cycle \
             --header="${env_summary}  |  ↑↓=navigate  Enter=actions  Esc=finish" \
             --bind='esc:abort' \
-            --preview-window=hidden
+            --preview-window=hidden \
+            --ansi
         ) || break
 
         mod=$(echo "$selected" | awk '{print $1}')
         [[ -z "$mod" ]] && break
+
+        if [[ "$mod" == "<ALL" ]]; then
+            action=$(echo -e "update all\nreinstall all\nuninstall all\ncancel" | fzf \
+                --layout=reverse --cycle \
+                --header="<ALL MODULES>" \
+                --bind='esc:abort'
+            ) || continue
+
+            case "$action" in
+                "update all")
+                    local confirm
+                    confirm=$(echo -e "yes\nno" | fzf --header="Update ALL installed modules?" 2>/dev/null || true)
+                    [[ "$confirm" == "yes" ]] || continue
+                    while IFS=$'\t' read -r m t mo s; do
+                        [[ -z "${m:-}" || "$m" == \#* ]] && continue
+                        local_ver=$(version_for "$(expand_path "$t")" || true)
+                        [[ -n "$local_ver" ]] && install_one "$m" "$t" "$mo" "$s"
+                    done < "$MANIFEST_FILE"
+                    ;;
+                "reinstall all")
+                    local confirm
+                    confirm=$(echo -e "yes\nno" | fzf --header="Reinstall ALL modules (overwrites local changes)?" 2>/dev/null || true)
+                    [[ "$confirm" == "yes" ]] || continue
+                    FORCE=1
+                    while IFS=$'\t' read -r m t mo s; do
+                        [[ -z "${m:-}" || "$m" == \#* ]] && continue
+                        install_one "$m" "$t" "$mo" "$s"
+                    done < "$MANIFEST_FILE"
+                    FORCE=0
+                    ;;
+                "uninstall all")
+                    local confirm
+                    confirm=$(echo -e "yes\nno" | fzf --header="Uninstall ALL modules? This is destructive." 2>/dev/null || true)
+                    [[ "$confirm" == "yes" ]] || continue
+                    while IFS=$'\t' read -r m t mo s; do
+                        [[ -z "${m:-}" || "$m" == \#* ]] && continue
+                        local dc; dc=$(module_disable_cmd "$m") && {
+                            echo "Disabling $m..."
+                            if echo " ${USER_SERVICE_MODULES} " | grep -q " ${m} "; then
+                                ${dc} 2>/dev/null || true
+                            else
+                                sudo ${dc} 2>/dev/null || true
+                            fi
+                        }
+                        uninstall_one "$m" "$t" "$mo" "$s"
+                    done < "$MANIFEST_FILE"
+                    ;;
+            esac
+            continue
+        fi
 
         while IFS=$'\t' read -r m t mo s; do
             [[ "$m" == "$mod" ]] && { target="$t"; mode="$mo"; source="$s"; break; }
@@ -837,7 +900,7 @@ cmd_reconfigure() {
 
         # Use cached values for state detection
         got_local_ver=$(version_for "$(expand_path "$target")" || true)
-            has_svc=0
+        has_svc=0
         is_service_module "$mod" && has_svc=1
         local file_installed=0 svc_active=0
         [[ -n "$got_local_ver" ]] && file_installed=1
