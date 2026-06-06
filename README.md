@@ -23,8 +23,10 @@ Installs `setup` CLI to `~/.local/bin/`, then runs `setup` (interactive fzf reco
 | `kernel-simmer` | `~/.local/bin/kernel-simmer` | `bin/kernel-simmer` |
 | `service-ctl` | `~/.local/bin/service-ctl` | `bin/service-ctl` |
 | `gpu-fancontrol` | `~/.local/bin/gpu-fancontrol` | `files/gpu-fancontrol` |
-| `monitoring` | `~/.local/bin/monitoring` | `files/monitoring` |
-| `backup` | `~/.local/bin/backup` | `bin/backup` |
+| `monitoring`     | `~/.local/bin/monitoring`     | `files/monitoring`     |
+| `refresh-models` | `~/.local/bin/refresh-models` | `files/refresh-models` |
+| `refresh-models-config` | `~/.config/opencode/refresh-models.json` | `files/refresh-models.json.example` |
+| `backup`          | `~/.local/bin/backup`          | `bin/backup`           |
 
 ## Commands
 
