@@ -85,6 +85,11 @@ module_is_active() {
     if echo " ${USER_SERVICE_MODULES} " | grep -q " $1 "; then
         user_flag="--user"
     fi
+    # macOS: check launchd for refresh-models
+    if [[ "$1" == "refresh-models" ]] && [[ "$(uname -s)" == "Darwin" ]]; then
+        launchctl print "gui/$(id -u)/com.lost.plus.refresh-models" &>/dev/null && return 0
+        return 1
+    fi
     [[ "$(systemctl ${user_flag} is-active "${unit}" 2>/dev/null)" == "active" ]]
 }
 
