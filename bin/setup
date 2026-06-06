@@ -153,6 +153,7 @@ git_tree_shas() {
         -H "User-Agent: setup/1.0" \
         "https://api.github.com/repos/LPFchan/setup/git/trees/main?recursive=1" 2>/dev/null || true)
     if [[ -z "$json" ]]; then
+        echo "Warning: could not reach GitHub API (rate-limited or offline)" >&2
         return 0
     fi
     _GTREE_CACHE=$(printf '%s\n' "$json" \
@@ -304,10 +305,16 @@ fi'
 
 fetch_payload() {
     local source="$1" payload="$2"
-    if ! curl -fsSL "$BASE_URL/$source" -o "$payload" \
-        || ! grep -q '^# setup-module: ' "$payload"; then
-        curl -fsSL "$FALLBACK_URL/$source" -o "$payload"
+    if curl -fsSL "$BASE_URL/$source" -o "$payload" 2>/dev/null \
+        && grep -q '^# setup-module: ' "$payload"; then
+        return 0
     fi
+    if curl -fsSL "$FALLBACK_URL/$source" -o "$payload" 2>/dev/null \
+        && grep -q '^# setup-module: ' "$payload"; then
+        return 0
+    fi
+    echo "Failed to fetch $source from both primary and fallback URLs" >&2
+    return 1
 }
 
 record_hash() {
@@ -402,7 +409,7 @@ install_one() {
 
     payload=$(mktemp)
 
-    fetch_payload "$source" "$payload"
+    fetch_payload "$source" "$payload" || { rm -f "$payload"; return 1; }
     remote_module=$(module_for "$payload" || true)
 
     if [[ "$remote_module" != "$module" ]]; then
@@ -950,8 +957,8 @@ if [[ -z "$cmd" ]]; then
     if [[ -t 1 ]] && command -v fzf >/dev/null 2>&1; then
         cmd_reconfigure
     else
-        cmd_update
-        cmd_install resume ai-menu 2>/dev/null || true
+        cmd_update || true
+        cmd_install resume ai-menu || true
     fi
     exit 0
 fi
