@@ -18,6 +18,9 @@ BATCH=0
 usage() {
     cat <<'EOF'
 Usage: linux-setup [--force] [--batch] <command> [module...]
+  Flags must come before the command.
+  --force  overwrite locally edited files
+  --batch  non-interactive mode
 
 Commands:
   list                 List available modules
@@ -689,42 +692,47 @@ module_state() {
 cmd_reconfigure() {
     configure_shell
     fetch_manifest
-    local input_lines=() module target mode source state label env_summary
-
-    # Build fzf input
-    while IFS=$'\t' read -r module target mode source; do
-        [[ -z "${module:-}" || "$module" == \#* ]] && continue
-        state=$(module_state "$module" "$target" "$source")
-        # Pre-check if installed
-        case "$state" in
-            "not installed") label="  " ;;
-            *)               label="[x]" ;;
-        esac
-        input_lines+=("${label} ${module}  ${state}")
-    done < "$MANIFEST_FILE"
+    local lines=() module target mode source state env_summary
 
     env_summary=$(detect_env_summary)
 
-    # If fzf is available and stdout is a terminal, use interactive selector
+    # Build fzf input: module_name   (state)
+    # Pre-selected = currently installed
+    while IFS=$'\t' read -r module target mode source; do
+        [[ -z "${module:-}" || "$module" == \#* ]] && continue
+        state=$(module_state "$module" "$target" "$source")
+        lines+=("${module}${module:+ }  (${state})")
+    done < "$MANIFEST_FILE"
+
     if command -v fzf >/dev/null 2>&1 && [[ -t 1 ]]; then
+        # Build initial selection string: module names pre-selected
+        local sel=""
+        while IFS=$'\t' read -r m t mo s; do
+            [[ -z "${m:-}" || "$m" == \#* ]] && continue
+            st=$(module_state "$m" "$t" "$s")
+            case "$st" in
+                "not installed") ;;
+                *) sel="${sel}${sel:+ }${m}" ;;
+            esac
+        done < "$MANIFEST_FILE"
+
         local selected
         selected=$(
-            printf '%s\n' "${input_lines[@]}" | \
+            printf '%s\n' "${lines[@]}" | \
             fzf --multi \
-                --bind=space:toggle+down,tab:toggle \
-                --header="${env_summary}  |  Tab/Spc toggle · Enter confirm" \
-                --preview='echo "linux-setup module: {2}"' \
+                --layout=reverse \
+                --bind='enter:toggle,alt-enter:accept' \
+                --header="${env_summary}  |  ↑↓=navigate  Enter=toggle  Alt+Enter=confirm" \
                 --preview-window=hidden
-        ) || return 0  # user cancelled
+        ) || return 0
 
         local -a wanted=()
         while IFS= read -r line; do
-            local mod
-            mod=$(echo "$line" | awk '{print $2}')
+            mod=$(echo "$line" | awk '{print $1}')
             [[ -n "$mod" ]] && wanted+=("$mod")
         done <<< "$selected"
 
-        # Install + enable wanted modules
+        # Install + enable wanted
         for module in "${wanted[@]}"; do
             while IFS=$'\t' read -r m target mode source; do
                 [[ "$m" == "$module" ]] || continue
@@ -732,32 +740,31 @@ cmd_reconfigure() {
                 local enable_cmd
                 enable_cmd=$(module_enable_cmd "$module") && {
                     echo "Enabling $module..."
-                    sudo ${enable_cmd} 2>/dev/null || echo "(enable deferred — run 'linux-setup enable $module' with sudo later)"
+                    sudo ${enable_cmd} 2>/dev/null || echo "(enable deferred — run with sudo later)"
                 }
             done < "$MANIFEST_FILE"
         done
 
-        # Uninstall modules not wanted (that are currently installed)
+        # Disable + uninstall not wanted
         while IFS=$'\t' read -r module target mode source; do
             [[ -z "${module:-}" || "$module" == \#* ]] && continue
-            local wanted_module
-            for wanted_module in "${wanted[@]}"; do
-                [[ "$wanted_module" == "$module" ]] && continue 2
+            local w
+            for w in "${wanted[@]}"; do
+                [[ "$w" == "$module" ]] && continue 2
             done
             local target_path
             target_path=$(expand_path "$target")
             if [[ -f "$target_path" ]]; then
                 echo "Removing $module..."
-                uninstall_one "$module" "$target" "$mode" "$source"
                 local disable_cmd
                 disable_cmd=$(module_disable_cmd "$module") && {
-                    echo "Disabling $module..."
-                    sudo ${disable_cmd} 2>/dev/null || echo "(disable deferred — run with sudo later)"
+                    sudo ${disable_cmd} 2>/dev/null || true
                 }
+                uninstall_one "$module" "$target" "$mode" "$source"
             fi
         done < "$MANIFEST_FILE"
     else
-        echo "No interactive terminal or fzf missing. Run with --batch or specify modules."
+        echo "No interactive terminal. Run with --batch or specify modules."
         exit 1
     fi
 }
