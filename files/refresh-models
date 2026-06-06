@@ -154,8 +154,19 @@ FORMAT_HANDLERS = {
 }
 
 
+def _grimoire_url():
+    """Return the correct grimoire base URL based on hostname."""
+    import socket
+    host = socket.gethostname()
+    if "grimoire" in host.lower():
+        return "http://localhost:9001/v1"
+    return "https://chat.lost.plus/v1"
+
+
 def refresh_server(name, cfg):
     base_url = cfg["baseURL"]
+    if name == "grimoire":
+        base_url = _grimoire_url()
     fmt = cfg.get("api_format", "openai")
     handler = FORMAT_HANDLERS.get(fmt, FORMAT_HANDLERS["openai"])
     npm = cfg.get("npm", "@ai-sdk/openai-compatible")
@@ -342,7 +353,7 @@ def cmd_enable():
     default_config = {
         "servers": {
             "grimoire": {
-                "baseURL": "http://localhost:9001/v1",
+                "baseURL": _grimoire_url(),
                 "api_format": "grimoire",
                 "npm": "@ai-sdk/openai-compatible",
                 "auth": {"type": "auth_json", "provider": "grimoire"},
