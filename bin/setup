@@ -796,7 +796,7 @@ cmd_reconfigure() {
                     ;;
                 "update all")
                     local confirm
-                    confirm=$(echo -e "yes\nno" | fzf --header="Update ALL installed modules?" 2>/dev/null || true)
+                    confirm=$(echo -e "yes\nno" | fzf --layout=reverse --height=3 --cycle --bind='esc:abort' --header="Update ALL installed modules?" 2>/dev/null || true)
                     [[ "$confirm" == "yes" ]] || continue
                     while IFS=$'\t' read -r m t mo s; do
                         [[ -z "${m:-}" || "$m" == \#* ]] && continue
@@ -806,7 +806,7 @@ cmd_reconfigure() {
                     ;;
                 "reinstall all")
                     local confirm
-                    confirm=$(echo -e "yes\nno" | fzf --header="Reinstall ALL modules (overwrites local changes)?" 2>/dev/null || true)
+                    confirm=$(echo -e "yes\nno" | fzf --layout=reverse --height=3 --cycle --bind='esc:abort' --header="Reinstall ALL modules (overwrites local changes)?" 2>/dev/null || true)
                     [[ "$confirm" == "yes" ]] || continue
                     FORCE=1
                     while IFS=$'\t' read -r m t mo s; do
@@ -817,7 +817,7 @@ cmd_reconfigure() {
                     ;;
                 "uninstall all")
                     local confirm
-                    confirm=$(echo -e "yes\nno" | fzf --header="Uninstall ALL modules? This is destructive." 2>/dev/null || true)
+                    confirm=$(echo -e "yes\nno" | fzf --layout=reverse --height=3 --cycle --bind='esc:abort' --header="Uninstall ALL modules? This is destructive." 2>/dev/null || true)
                     [[ "$confirm" == "yes" ]] || continue
                     while IFS=$'\t' read -r m t mo s; do
                         [[ -z "${m:-}" || "$m" == \#* ]] && continue
