@@ -1,0 +1,29 @@
+name: checksums
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bin/**'
+      - 'files/**'
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: generate checksums
+        run: scripts/checksums
+      - name: commit if changed
+        run: |
+          if git diff --quiet checksums.tsv; then
+            echo "no changes"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add checksums.tsv
+            git commit -m "chore: refresh checksums.tsv [skip ci]"
+            git push
+          fi
