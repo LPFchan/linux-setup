@@ -16,14 +16,19 @@ import json, os, sys, urllib.request, urllib.error, subprocess, pathlib, getpass
 
 CONFIG_PATH = os.path.expanduser("~/.config/opencode/refresh-models.json")
 OPENCODE_PATH = os.path.expanduser("~/.config/opencode/opencode.json")
-AUTH_PATH = os.path.expanduser("~/.local/share/opencode/auth.json")
+ZSENV_PATH = os.path.expanduser("~/.zshenv")
 SERVICE_DIR = os.path.expanduser("~/.config/systemd/user")
+OLD_AUTH_PATH = os.path.expanduser("~/.local/share/opencode/auth.json")
+
+AUTH_BLOCK_BEGIN = "# BEGIN setup:api-keys"
+AUTH_BLOCK_END = "# END setup:api-keys"
 
 SERVICE_UNIT = """[Unit]
 Description=Refresh opencode model list from configured providers
 
 [Service]
 Type=oneshot
+EnvironmentFile=-%%h/.zshenv
 ExecStart=%s
 """
 
@@ -50,18 +55,99 @@ def save_json(path, data):
         f.write("\n")
 
 
+def _migrate_auth_json():
+    if not os.path.exists(OLD_AUTH_PATH):
+        return
+    try:
+        old = load_json(OLD_AUTH_PATH)
+    except Exception:
+        return
+    if not isinstance(old, dict) or not old:
+        return
+
+    lines = []
+    for provider, entry in old.items():
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("key", "")
+        if key and isinstance(key, str) and key.strip():
+            env_name = f"{provider.upper()}_API_KEY"
+            lines.append(f"export {env_name}={key.strip()}")
+
+    if not lines:
+        return
+
+    _write_env_block(lines)
+    os.remove(OLD_AUTH_PATH)
+    print(f"Migrated {len(lines)} API key(s) from {OLD_AUTH_PATH} to {ZSENV_PATH}")
+
+
+def _read_env_block():
+    if not os.path.exists(ZSENV_PATH):
+        return {}
+    keys = {}
+    in_block = False
+    with open(ZSENV_PATH) as f:
+        for line in f:
+            if line.strip() == AUTH_BLOCK_BEGIN:
+                in_block = True
+                continue
+            if line.strip() == AUTH_BLOCK_END:
+                in_block = False
+                continue
+            if in_block:
+                line = line.strip()
+                if line.startswith("export ") and "=" in line:
+                    kv = line[len("export "):]
+                    name, _, val = kv.partition("=")
+                    keys[name] = val
+    return keys
+
+
+def _write_env_block(lines):
+    ensure_block = False
+    existing = []
+    if os.path.exists(ZSENV_PATH):
+        in_block = False
+        with open(ZSENV_PATH) as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped == AUTH_BLOCK_BEGIN:
+                    in_block = True
+                    continue
+                if stripped == AUTH_BLOCK_END:
+                    in_block = False
+                    continue
+                if not in_block:
+                    existing.append(line)
+                # drop old block lines
+        ensure_block = True
+    else:
+        ensure_block = True
+
+    with open(ZSENV_PATH, "w") as f:
+        for line in existing:
+            f.write(line)
+        if ensure_block:
+            f.write(f"\n{AUTH_BLOCK_BEGIN}\n")
+            for l in lines:
+                f.write(l + "\n")
+            f.write(f"{AUTH_BLOCK_END}\n")
+
+
 def get_auth(auth_cfg):
     if auth_cfg is None:
         return None, None
     atype = auth_cfg.get("type")
     if atype == "auth_json":
-        provider = auth_cfg.get("provider")
-        auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
-        entry = auth_data.get(provider, {})
-        if entry.get("type") == "api":
-            return "api_key", entry["key"]
-        elif entry.get("type") == "oauth":
-            return "bearer", entry.get("access")
+        provider = auth_cfg.get("provider", "")
+        env_name = f"{provider.upper()}_API_KEY"
+        key = os.environ.get(env_name, "")
+        if not key:
+            block = _read_env_block()
+            key = block.get(env_name, "")
+        if key:
+            return "api_key", key
     elif atype == "api_key":
         return "api_key", auth_cfg["key"]
     elif atype == "bearer":
@@ -155,7 +241,6 @@ FORMAT_HANDLERS = {
 
 
 def _grimoire_url():
-    """Return the correct grimoire base URL based on hostname."""
     import socket
     host = socket.gethostname()
     if "grimoire" in host.lower():
@@ -224,17 +309,36 @@ PROVIDER_URLS = {
 }
 
 
+def _env_name(provider):
+    return f"{provider.upper()}_API_KEY"
+
+
+def _get_key(provider):
+    key = os.environ.get(_env_name(provider), "")
+    if not key:
+        block = _read_env_block()
+        key = block.get(_env_name(provider), "")
+    return key
+
+
+def _set_key(provider, key):
+    block = _read_env_block()
+    block[_env_name(provider)] = key
+    lines = [f"export {k}={v}" for k, v in block.items()]
+    _write_env_block(lines)
+
+
 def cmd_auth():
     """Interactive or direct API key onboarding.
 
     refresh-models auth                     → interactive prompt for all missing keys
     refresh-models auth <provider> <key>    → write key directly (agent-friendly)
     """
+    _migrate_auth_json()
+
     cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
     servers = cfg.get("servers", {})
-    auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
 
-    # Agent mode: direct key write
     if len(sys.argv) >= 4:
         provider = sys.argv[2]
         key = sys.argv[3]
@@ -242,15 +346,13 @@ def cmd_auth():
             print(f"Unknown provider: {provider}", file=sys.stderr)
             print(f"Known: {', '.join(servers.keys())}", file=sys.stderr)
             sys.exit(1)
-        auth_data[provider] = {"type": "api", "key": key}
-        pathlib.Path(os.path.dirname(AUTH_PATH)).mkdir(parents=True, exist_ok=True)
-        save_json(AUTH_PATH, auth_data)
-        print(f"Wrote {provider} key to {AUTH_PATH}")
+        _set_key(provider, key)
+        print(f"Wrote {provider.upper()}_API_KEY to {ZSENV_PATH}")
         return
 
-    # Interactive mode
-    missing = [s for s in servers if s not in auth_data]
-    configured = [s for s in servers if s in auth_data]
+    existing_keys = _read_env_block()
+    missing = [s for s in servers if _env_name(s) not in existing_keys]
+    configured = [s for s in servers if _env_name(s) in existing_keys]
 
     if configured:
         print("Configured:")
@@ -259,7 +361,7 @@ def cmd_auth():
         print()
 
     if not missing:
-        print("All providers have API keys in auth.json.")
+        print("All providers have API keys in ~/.zshenv.")
         return
 
     print("Missing API keys:")
@@ -278,18 +380,20 @@ def cmd_auth():
             print()
             break
         if key.strip():
-            auth_data[s] = {"type": "api", "key": key.strip()}
+            existing_keys[_env_name(s)] = key.strip()
             updated = True
 
     if updated:
-        pathlib.Path(os.path.dirname(AUTH_PATH)).mkdir(parents=True, exist_ok=True)
-        save_json(AUTH_PATH, auth_data)
-        print(f"\nSaved to {AUTH_PATH}")
+        lines = [f"export {k}={v}" for k, v in existing_keys.items()]
+        _write_env_block(lines)
+        print(f"\nSaved to {ZSENV_PATH}")
     else:
         print("\nNo keys entered.")
 
 
 def cmd_enable():
+    _migrate_auth_json()
+
     script_path = os.path.abspath(sys.argv[0])
     cfg_dir = os.path.dirname(CONFIG_PATH)
     pathlib.Path(cfg_dir).mkdir(parents=True, exist_ok=True)
@@ -325,7 +429,6 @@ def cmd_enable():
         r = subprocess.run(["launchctl", "bootstrap", f"gui/{_uid}", plist_path],
                            capture_output=True)
         if r.returncode == 125:
-            # pre-Ventura: bootstrap not supported in GUI domain, fall back to load
             r = subprocess.run(["launchctl", "load", plist_path], capture_output=True)
         if r.returncode == 0:
             print("refresh-models launchd agent enabled (hourly)")
@@ -377,7 +480,6 @@ def cmd_enable():
         save_json(CONFIG_PATH, default_config)
         print(f"  Wrote default config to {CONFIG_PATH}")
 
-    # Merge any newly-added providers into existing config
     cfg = load_json(CONFIG_PATH)
     existing = cfg.get("servers", {})
     added = []
@@ -391,8 +493,8 @@ def cmd_enable():
         print(f"  Added new providers to config: {', '.join(added)}")
 
     servers = cfg.get("servers", {})
-    auth_data = load_json(AUTH_PATH) if os.path.exists(AUTH_PATH) else {}
-    missing = [s for s in servers if s not in auth_data]
+    existing_keys = _read_env_block()
+    missing = [s for s in servers if _env_name(s) not in existing_keys]
     if missing:
         print()
         miss_list = ", ".join(missing)
@@ -414,11 +516,12 @@ def cmd_enable():
                     print()
                     break
                 if key.strip():
-                    auth_data[s] = {"type": "api", "key": key.strip()}
+                    existing_keys[_env_name(s)] = key.strip()
                     updated = True
             if updated:
-                save_json(AUTH_PATH, auth_data)
-                print(f"\nSaved to {AUTH_PATH}")
+                lines = [f"export {k}={v}" for k, v in existing_keys.items()]
+                _write_env_block(lines)
+                print(f"\nSaved to {ZSENV_PATH}")
             else:
                 print("  Run: refresh-models auth")
 
@@ -478,8 +581,11 @@ def cmd_status():
     cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
     servers = cfg.get("servers", {})
     print(f"servers configured: {len(servers)}")
+    existing_keys = _read_env_block()
     for name in servers:
-        print(f"  {name}: {servers[name].get('baseURL')}")
+        env_name = _env_name(name)
+        status = "key: ✓" if env_name in existing_keys else "key: ✗"
+        print(f"  {name}: {servers[name].get('baseURL')}  {status}")
 
 
 # --- main -------------------------------------------------------------
@@ -534,7 +640,6 @@ def main():
         print("  refresh-models --help       Show this message")
         return
 
-    # Assume it's a server name
     cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {}
     servers = cfg.get("servers", {})
     if cmd in servers:

@@ -186,6 +186,51 @@ _migrate_ai_menu() {
     done
 }
 
+_migrate_auth_json() {
+    local old="$HOME/.local/share/opencode/auth.json"
+    [[ -f "$old" ]] || return 0
+    python3 -c "
+import json, os, pathlib
+old = os.path.expanduser('~/.local/share/opencode/auth.json')
+zsenv = os.path.expanduser('~/.zshenv')
+begin = '# BEGIN setup:api-keys'
+end = '# END setup:api-keys'
+try:
+    data = json.load(open(old))
+except Exception:
+    os.remove(old)
+    exit(0)
+if not isinstance(data, dict) or not data:
+    os.remove(old)
+    exit(0)
+lines = []
+for p, e in data.items():
+    if isinstance(e, dict) and e.get('key','').strip():
+        lines.append(f'export {p.upper()}_API_KEY={e[\"key\"].strip()}')
+if not lines:
+    os.remove(old)
+    exit(0)
+existing = []
+in_block = False
+if os.path.exists(zsenv):
+    for l in open(zsenv):
+        s = l.strip()
+        if s == begin: in_block = True; continue
+        if s == end: in_block = False; continue
+        if not in_block:
+            existing.append(l)
+with open(zsenv, 'w') as f:
+    for l in existing:
+        f.write(l)
+    f.write(f'\n{begin}\n')
+    for l in lines:
+        f.write(l + '\n')
+    f.write(f'{end}\n')
+os.remove(old)
+print(f'Migrated {len(lines)} API key(s) from {old} to {zsenv}')
+" 2>&1 || true
+}
+
 module_for() {
     local file="$1"
     [[ -f "$file" ]] || return 0
@@ -447,6 +492,9 @@ install_one() {
         if [[ "$module" == "ai-menu" ]]; then
             _migrate_ai_menu
         fi
+        if [[ "$module" == "refresh-models" ]]; then
+            _migrate_auth_json
+        fi
         echo "Current $module -> $target"
         rm -f "$payload"
         return 0
@@ -461,6 +509,9 @@ install_one() {
         rm -f "$payload"
         if [[ "$module" == "ai-menu" ]]; then
             _migrate_ai_menu
+        fi
+        if [[ "$module" == "refresh-models" ]]; then
+            _migrate_auth_json
         fi
         if [[ "$module" == "setup" ]]; then
             echo "Restarting setup..."
@@ -482,6 +533,9 @@ install_one() {
             [[ -f "$_f" ]] && sed -i '' -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
             [[ -f "$_f" ]] && sed -i -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
         done
+    fi
+    if [[ "$module" == "refresh-models" ]]; then
+        _migrate_auth_json
     fi
     rm -f "$payload"
     if [[ "$module" == "setup" ]]; then
