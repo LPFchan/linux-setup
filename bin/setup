@@ -89,7 +89,7 @@ module_is_active() {
     fi
     # macOS: check launchd for refresh-models
     if [[ "$1" == "refresh-models" ]] && [[ "$(uname -s)" == "Darwin" ]]; then
-        launchctl print "gui/$(id -u)/com.lost.plus.refresh-models" &>/dev/null && return 0
+        launchctl print "user/$(id -u)/com.lost.plus.refresh-models" &>/dev/null && return 0
         return 1
     fi
     [[ "$(systemctl ${user_flag} is-active "${unit}" 2>/dev/null)" == "active" ]]
@@ -872,11 +872,8 @@ cmd_schedule() {
 </plist>
 PLIST
         local _uid; _uid=$(id -u)
-        launchctl bootout "gui/$_uid/com.lost.plus.setup-update" 2>/dev/null || true
-        local r; r=$(launchctl bootstrap "gui/$_uid" "$plist" 2>&1) || true
-        if echo "$r" | grep -q '125'; then
-            launchctl load "$plist" 2>/dev/null || true
-        fi
+        launchctl bootout "user/$_uid/com.lost.plus.setup-update" 2>/dev/null || true
+        launchctl bootstrap "user/$_uid" "$plist" 2>/dev/null || true
         echo "setup auto-update scheduled daily at 03:00 (launchd)"
     else
         local dir="$HOME/.config/systemd/user"
@@ -893,7 +890,7 @@ cmd_unschedule() {
     if [[ "$(uname -s)" == "Darwin" ]]; then
         local plist="$HOME/Library/LaunchAgents/com.lost.plus.setup-update.plist"
         local _uid; _uid=$(id -u)
-        launchctl bootout "gui/$_uid/com.lost.plus.setup-update" 2>/dev/null || true
+        launchctl bootout "user/$_uid/com.lost.plus.setup-update" 2>/dev/null || true
         rm -f "$plist"
         echo "setup auto-update unscheduled"
     else
