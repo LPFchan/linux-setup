@@ -491,7 +491,7 @@ install_one() {
         if [[ "$module" == "refresh-models" ]]; then
             _migrate_auth_json
         fi
-        echo "Current $module -> $target"
+        echo "$module ${old_hash:0:7} (current) -> $target"
         rm -f "$payload"
         return 0
     fi
@@ -501,7 +501,7 @@ install_one() {
     elif [[ -f "$target" ]]; then
         install -m "$mode" "$payload" "$target"
         record_hash "$target" "$new_hash" "$new_hash"
-        echo "Replaced foreign file: $module -> $target"
+        echo "$module ${new_hash:0:7} (foreign) -> $target"
         rm -f "$payload"
         if [[ "$module" == "ai-menu" ]]; then
             _migrate_ai_menu
@@ -519,9 +519,9 @@ install_one() {
     install -m "$mode" "$payload" "$target"
     record_hash "$target" "$new_hash" "$new_hash"
     if [[ -n "$old_hash" && "$old_hash" != "$new_hash" ]]; then
-        echo "Updated $module"
+        echo "$module ${old_hash:0:7} -> ${new_hash:0:7} -> $target"
     else
-        echo "Installed $module -> $target"
+        echo "$module ${new_hash:0:7} (install) -> $target"
     fi
     if [[ "$module" == "ai-menu" ]]; then
         rm -f "$HOME/.bashrc.d/ai-start-menu"
