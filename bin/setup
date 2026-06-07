@@ -694,7 +694,7 @@ cmd_install() {
 cmd_update() {
     fetch_manifest
     local new_count=0 new_names=() filters=()
-    local target_module
+    local target_module setup_target setup_mode setup_source setup_local_hash
     for target_module in "$@"; do
         filters+=("$target_module")
     done
@@ -710,6 +710,11 @@ cmd_update() {
         local target_path local_hash
         target_path=$(expand_path "$target")
         local_hash=$(installed_hash_for "$target_path" || true)
+        if [[ "$module" == "setup" ]]; then
+            setup_target="$target"; setup_mode="$mode"; setup_source="$source"
+            setup_local_hash="$local_hash"
+            continue
+        fi
         if [[ -z "$local_hash" ]]; then
             new_count=$((new_count + 1))
             new_names+=("$module")
@@ -717,6 +722,10 @@ cmd_update() {
             install_one "$module" "$target" "$mode" "$source"
         fi
     done < "$MANIFEST_FILE"
+    # Update setup last — self-update exec restarts the process
+    if [[ -n "${setup_target:-}" ]] && [[ -n "${setup_local_hash:-}" ]]; then
+        install_one setup "$setup_target" "$setup_mode" "$setup_source"
+    fi
     echo
     if [[ "$new_count" -gt 0 ]]; then
         echo "$new_count new module(s) available: ${new_names[*]}"
@@ -1026,24 +1035,41 @@ cmd_reconfigure() {
                     continue
                     ;;
                 "update all")
-                    local confirm
+                    local confirm setup_entry
                     confirm=$(echo -e "yes\nno" | fzf --layout=reverse --height=3 --cycle --bind='esc:abort' --header="Update ALL installed modules?" 2>/dev/null || true)
                     [[ "$confirm" == "yes" ]] || continue
                     while IFS=$'\t' read -r m t mo s; do
                         [[ -z "${m:-}" || "$m" == \#* ]] && continue
+                        if [[ "$m" == "setup" ]]; then
+                            setup_entry="$t"$'\t'"$mo"$'\t'"$s"
+                            continue
+                        fi
                         local_hash=$(installed_hash_for "$(expand_path "$t")" || true)
                         [[ -n "$local_hash" ]] && install_one "$m" "$t" "$mo" "$s"
                     done < "$MANIFEST_FILE"
+                    if [[ -n "${setup_entry:-}" ]]; then
+                        IFS=$'\t' read -r st smo ss <<< "$setup_entry"
+                        local_hash=$(installed_hash_for "$(expand_path "$st")" || true)
+                        [[ -n "$local_hash" ]] && install_one setup "$st" "$smo" "$ss"
+                    fi
                     ;;
                 "reinstall all")
-                    local confirm
+                    local confirm setup_entry
                     confirm=$(echo -e "yes\nno" | fzf --layout=reverse --height=3 --cycle --bind='esc:abort' --header="Reinstall ALL modules (overwrites local changes)?" 2>/dev/null || true)
                     [[ "$confirm" == "yes" ]] || continue
                     FORCE=1
                     while IFS=$'\t' read -r m t mo s; do
                         [[ -z "${m:-}" || "$m" == \#* ]] && continue
+                        if [[ "$m" == "setup" ]]; then
+                            setup_entry="$t"$'\t'"$mo"$'\t'"$s"
+                            continue
+                        fi
                         install_one "$m" "$t" "$mo" "$s"
                     done < "$MANIFEST_FILE"
+                    if [[ -n "${setup_entry:-}" ]]; then
+                        IFS=$'\t' read -r st smo ss <<< "$setup_entry"
+                        install_one setup "$st" "$smo" "$ss"
+                    fi
                     FORCE=0
                     ;;
                 "uninstall all")
