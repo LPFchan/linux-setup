@@ -650,7 +650,7 @@ cmd_install() {
         if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
             ${ec} 2>&1 || echo "(enable failed — check above for errors)"
         else
-            sudo ${ec} 2>&1 || echo "(enable failed — run 'setup enable $module' with sudo)"
+            sudo -E ${ec} 2>&1 || echo "(enable failed — run 'setup enable $module' with sudo)"
         fi
     done
 }
@@ -703,7 +703,7 @@ cmd_uninstall() {
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
                         ${dc} 2>&1 || true
                     else
-                        sudo ${dc} 2>&1 || true
+                        sudo -E ${dc} 2>&1 || true
                     fi
                 }
             fi
@@ -749,22 +749,9 @@ cmd_enable() {
         if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
             ${cmd}
         else
-            sudo ${cmd}
-        fi
-    done
-}
-
-cmd_disable() {
-    local modules=("$@")
-    ((${#modules[@]} == 0)) && modules=(${SERVICE_MODULES})
-    for module in "${modules[@]}"; do
-        is_service_module "$module" || { echo "Not a service module: $module" >&2; continue; }
-        local cmd; cmd=$(module_disable_cmd "$module")
-        echo "Disabling $module..."
-        if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
-            ${cmd}
-        else
-            sudo ${cmd}
+sudo -E ${cmd}
+    else
+        sudo -E ${cmd}
         fi
     done
 }
@@ -940,7 +927,7 @@ cmd_reconfigure() {
                             if echo " ${USER_SERVICE_MODULES} " | grep -q " ${m} "; then
                                 ${dc} 2>&1 || true
                             else
-                                sudo ${dc} 2>&1 || true
+                                sudo -E ${dc} 2>&1 || true
                             fi
                         }
                         uninstall_one "$m" "$t" "$mo" "$s"
@@ -973,9 +960,11 @@ cmd_reconfigure() {
             actions="${actions}reinstall"$'\n'
             actions="${actions}uninstall"$'\n'
         else
-            actions="install"$'\n'
-            (( has_svc )) && actions="${actions}install + enable"$'\n'
-        fi
+            if (( has_svc )); then
+                actions="install + enable"$'\n'
+            else
+                actions="install"$'\n'
+            fi
         actions="${actions}cancel"
 
         action=$(echo "$actions" | fzf \
@@ -994,7 +983,7 @@ cmd_reconfigure() {
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
                         ${ec} 2>&1 || echo "(enable failed — see above)"
                     else
-                        sudo ${ec} 2>&1 || echo "(enable failed — see above)"
+                        sudo -E ${ec} 2>&1 || echo "(enable failed — see above)"
                     fi
                 } ;;
             enable)
@@ -1003,7 +992,7 @@ cmd_reconfigure() {
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
                         ${ec} 2>&1 || echo "(enable failed — see above)"
                     else
-                        sudo ${ec} 2>&1 || echo "(enable failed — see above)"
+                        sudo -E ${ec} 2>&1 || echo "(enable failed — see above)"
                     fi
                 } ;;
             disable)
@@ -1012,7 +1001,7 @@ cmd_reconfigure() {
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
                         ${dc} 2>&1 || true
                     else
-                        sudo ${dc} 2>&1 || true
+                        sudo -E ${dc} 2>&1 || true
                     fi
                 } ;;
             update)
@@ -1027,7 +1016,7 @@ cmd_reconfigure() {
                     if echo " ${USER_SERVICE_MODULES} " | grep -q " ${mod} "; then
                         ${dc} 2>&1 || true
                     else
-                        sudo ${dc} 2>&1 || true
+                        sudo -E ${dc} 2>&1 || true
                     fi
                 }
                 uninstall_one "$mod" "$target" "$mode" "$source" ;;
