@@ -3,8 +3,8 @@
 # setup-source: bin/setup
 set -uo pipefail
 
-BASE_URL="${LINUX_SETUP_BASE_URL:-https://setup.lost.plus}"
-FALLBACK_URL="${LINUX_SETUP_FALLBACK_URL:-https://raw.githubusercontent.com/LPFchan/setup/main}"
+BASE_URL="${LINUX_SETUP_BASE_URL:-https://raw.githubusercontent.com/LPFchan/setup/main}"
+FALLBACK_URL="${LINUX_SETUP_FALLBACK_URL:-https://setup.lost.plus}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/setup"
 MANIFEST_URL="$BASE_URL/manifest.tsv"
 MANIFEST_FILE="$STATE_DIR/manifest.tsv"
