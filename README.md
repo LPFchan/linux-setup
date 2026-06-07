@@ -49,3 +49,13 @@ setup                     # interactive fzf reconfigure
 - `manifest.tsv` declares module, target path, mode, and source path.
 - Each managed source file declares its own module and version.
 - Secrets do not belong in this repo.
+
+## Contributing
+
+After cloning, enable the tracked pre-commit hook:
+
+```bash
+git config core.hooksPath hooks
+```
+
+The hook runs `bash -n` syntax checks and regenerates `checksums.tsv` on commit.
