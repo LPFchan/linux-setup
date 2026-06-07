@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${LINUX_SETUP_BASE_URL:-https://setup.lost.plus}"
-FALLBACK_URL="${LINUX_SETUP_FALLBACK_URL:-https://raw.githubusercontent.com/LPFchan/setup/main}"
+SOURCE_URL="${LINUX_SETUP_SOURCE_URL:-https://raw.githubusercontent.com/LPFchan/setup/main}"
 BIN_DIR="$HOME/.local/bin"
 TARGET="$BIN_DIR/setup"
 has_path_setup() {
@@ -147,9 +146,10 @@ mkdir -p "$BIN_DIR"
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
-if ! curl -fsSL "$BASE_URL/bin/setup" -o "$tmp" \
+if ! curl -fsSL "$SOURCE_URL/bin/setup" -o "$tmp" \
     || ! grep -q '^# setup-module: setup$' "$tmp"; then
-    curl -fsSL "$FALLBACK_URL/bin/setup" -o "$tmp"
+    echo "Failed to fetch setup from $SOURCE_URL" >&2
+    exit 1
 fi
 
 install -m 0755 "$tmp" "$TARGET"

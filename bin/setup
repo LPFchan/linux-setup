@@ -3,10 +3,9 @@
 # setup-source: bin/setup
 set -uo pipefail
 
-BASE_URL="${LINUX_SETUP_BASE_URL:-https://raw.githubusercontent.com/LPFchan/setup/main}"
-FALLBACK_URL="${LINUX_SETUP_FALLBACK_URL:-https://setup.lost.plus}"
+SOURCE_URL="${LINUX_SETUP_SOURCE_URL:-https://raw.githubusercontent.com/LPFchan/setup/main}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/setup"
-MANIFEST_URL="$BASE_URL/manifest.tsv"
+MANIFEST_URL="$SOURCE_URL/manifest.tsv"
 MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 HASH_FILE="$STATE_DIR/installed.tsv"
 FORCE=0
@@ -36,7 +35,7 @@ Commands:
 Run without arguments for interactive fzf reconfigure.
 
 Environment:
-  LINUX_SETUP_BASE_URL Override source URL root
+  LINUX_SETUP_SOURCE_URL Override source URL root
 EOF
 }
 
@@ -111,11 +110,7 @@ expand_path() {
 
 fetch_manifest() {
     mkdir -p "$STATE_DIR"
-    if curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" 2>/dev/null \
-        && grep -q '^# module' "$MANIFEST_FILE"; then
-        return 0
-    fi
-    curl -fsSL "$FALLBACK_URL/manifest.tsv" -o "$MANIFEST_FILE" 2>/dev/null || true
+    curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" 2>/dev/null || true
 }
 
 module_selected() {
@@ -145,14 +140,11 @@ fetch_checksums() {
     fi
     local tmp
     tmp=$(mktemp)
-    if curl -fsSL "$BASE_URL/checksums.tsv" -o "$tmp" 2>/dev/null \
-        && grep -q '^# source' "$tmp"; then
-        _CSUM_CACHE=$(cat "$tmp")
-    elif curl -fsSL "$FALLBACK_URL/checksums.tsv" -o "$tmp" 2>/dev/null \
+    if curl -fsSL "$SOURCE_URL/checksums.tsv" -o "$tmp" 2>/dev/null \
         && grep -q '^# source' "$tmp"; then
         _CSUM_CACHE=$(cat "$tmp")
     else
-        echo "Warning: could not fetch checksums.tsv" >&2
+        echo "Warning: could not fetch checksums.tsv from $SOURCE_URL" >&2
     fi
     rm -f "$tmp"
 }
@@ -371,15 +363,11 @@ fi'
 
 fetch_payload() {
     local source="$1" payload="$2"
-    if curl -fsSL "$BASE_URL/$source" -o "$payload" 2>/dev/null \
+    if curl -fsSL "$SOURCE_URL/$source" -o "$payload" 2>/dev/null \
         && grep -q '^# setup-module: ' "$payload"; then
         return 0
     fi
-    if curl -fsSL "$FALLBACK_URL/$source" -o "$payload" 2>/dev/null \
-        && grep -q '^# setup-module: ' "$payload"; then
-        return 0
-    fi
-    echo "Failed to fetch $source from both primary and fallback URLs" >&2
+    echo "Failed to fetch $source from $SOURCE_URL" >&2
     return 1
 }
 
