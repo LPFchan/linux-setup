@@ -56,6 +56,7 @@ def save_json(path, data):
 
 
 def _migrate_auth_json():
+    _reconstruct_auth_json()
     if not os.path.exists(OLD_AUTH_PATH):
         return
     try:
@@ -89,7 +90,25 @@ def _migrate_auth_json():
     print(f"  (kept {OLD_AUTH_PATH} as fallback — delete manually when ready)")
 
 
-def _read_env_block():
+def _reconstruct_auth_json():
+    if os.path.exists(OLD_AUTH_PATH):
+        return
+    block = _read_env_block()
+    if not block:
+        return
+    data = {}
+    for env_name, value in block.items():
+        if env_name.endswith("_API_KEY"):
+            provider = env_name[:-8].lower()
+            data[provider] = {"type": "api", "key": value}
+        elif env_name.endswith("_OAUTH_TOKEN"):
+            provider = env_name[:-12].lower()
+            data[provider] = {"type": "oauth", "access": value}
+    if not data:
+        return
+    pathlib.Path(os.path.dirname(OLD_AUTH_PATH)).mkdir(parents=True, exist_ok=True)
+    save_json(OLD_AUTH_PATH, data)
+    print(f"Reconstructed {OLD_AUTH_PATH} from {ZSENV_PATH} ({len(data)} provider(s))")
     if not os.path.exists(ZSENV_PATH):
         return {}
     keys = {}
@@ -173,7 +192,10 @@ def get_auth(auth_cfg):
         if not key:
             block = _read_env_block()
             key = block.get(env_name, "")
-        if not key:
+        if not key and not os.path.exists(OLD_AUTH_PATH):
+            _reconstruct_auth_json()
+            key = _fallback_auth_json(provider)
+        elif not key:
             key = _fallback_auth_json(provider)
         if key:
             return "api_key", key
