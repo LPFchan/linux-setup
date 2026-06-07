@@ -55,8 +55,25 @@ def save_json(path, data):
         f.write("\n")
 
 
-def _migrate_auth_json():
-    _reconstruct_auth_json()
+def _env_name(provider):
+    return f"{provider.replace('-', '_').upper()}_API_KEY"
+
+
+def _oauth_env_name(provider):
+    return f"{provider.replace('-', '_').upper()}_OAUTH_TOKEN"
+
+
+def _provider_from_env(env_name):
+    if env_name.endswith("_API_KEY"):
+        return env_name[:-8].lower().replace("_", "-")
+    if env_name.endswith("_OAUTH_TOKEN"):
+        return env_name[:-12].lower().replace("_", "-")
+    return ""
+
+
+def _export_auth_to_zsenv():
+    """One-way sync: auth.json → .zshenv. Called on enable/auth to surface
+    keys set by opencode's /connect command."""
     if not os.path.exists(OLD_AUTH_PATH):
         return
     try:
@@ -74,12 +91,12 @@ def _migrate_auth_json():
         if etype == "api":
             key = entry.get("key", "")
             if key and isinstance(key, str) and key.strip():
-                env_name = f"{provider.replace('-', '_').upper()}_API_KEY"
+                env_name = _env_name(provider)
                 lines.append(f"export {env_name}={key.strip()}")
         elif etype == "oauth":
             access = entry.get("access", "")
             if access and isinstance(access, str):
-                env_name = f"{provider.replace('-', '_').upper()}_OAUTH_TOKEN"
+                env_name = _oauth_env_name(provider)
                 lines.append(f"export {env_name}={access}")
 
     if not lines:
@@ -87,7 +104,42 @@ def _migrate_auth_json():
 
     _write_env_block(lines)
     print(f"Exported {len(lines)} key(s) from {OLD_AUTH_PATH} to {ZSENV_PATH}")
-    print(f"  (kept {OLD_AUTH_PATH} as fallback — delete manually when ready)")
+
+
+def _sync_zsenv_to_auth():
+    """Ensure auth.json reflects the current .zshenv api-keys block.
+    Never deletes entries that exist only in auth.json."""
+    block = _read_env_block()
+    if not block:
+        return
+
+    existing = {}
+    if os.path.exists(OLD_AUTH_PATH):
+        try:
+            existing = load_json(OLD_AUTH_PATH)
+        except Exception:
+            pass
+    if not isinstance(existing, dict):
+        existing = {}
+
+    updated = False
+    for env_name, value in block.items():
+        provider = _provider_from_env(env_name)
+        if not provider:
+            continue
+        if env_name.endswith("_API_KEY"):
+            if provider not in existing or existing.get(provider, {}).get("key") != value:
+                existing[provider] = {"type": "api", "key": value}
+                updated = True
+        elif env_name.endswith("_OAUTH_TOKEN"):
+            if provider not in existing or existing.get(provider, {}).get("access") != value:
+                existing.setdefault(provider, {})["type"] = "oauth"
+                existing[provider]["access"] = value
+                updated = True
+
+    if updated:
+        pathlib.Path(os.path.dirname(OLD_AUTH_PATH)).mkdir(parents=True, exist_ok=True)
+        save_json(OLD_AUTH_PATH, existing)
 
 
 def _read_env_block():
@@ -190,15 +242,8 @@ def get_auth(auth_cfg):
     atype = auth_cfg.get("type")
     if atype == "auth_json":
         provider = auth_cfg.get("provider", "")
-        env_name = f"{provider.upper()}_API_KEY"
-        key = os.environ.get(env_name, "")
+        key = os.environ.get(_env_name(provider), "")
         if not key:
-            block = _read_env_block()
-            key = block.get(env_name, "")
-        if not key and not os.path.exists(OLD_AUTH_PATH):
-            _reconstruct_auth_json()
-            key = _fallback_auth_json(provider)
-        elif not key:
             key = _fallback_auth_json(provider)
         if key:
             return "api_key", key
@@ -370,9 +415,6 @@ def _env_name(provider):
 def _get_key(provider):
     key = os.environ.get(_env_name(provider), "")
     if not key:
-        block = _read_env_block()
-        key = block.get(_env_name(provider), "")
-    if not key:
         key = _fallback_auth_json(provider)
     return key
 
@@ -382,6 +424,8 @@ def _set_key(provider, key):
     block[_env_name(provider)] = key
     lines = [f"export {k}={v}" for k, v in block.items()]
     _write_env_block(lines)
+    _sync_zsenv_to_auth()
+    print(f"Saved {_env_name(provider)} to {ZSENV_PATH} and {OLD_AUTH_PATH}")
 
 
 def cmd_auth():
@@ -390,7 +434,7 @@ def cmd_auth():
     refresh-models auth                     → interactive prompt for all missing keys
     refresh-models auth <provider> <key>    → write key directly (agent-friendly)
     """
-    _migrate_auth_json()
+    _export_auth_to_zsenv()
 
     cfg = load_json(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else {"servers": {}}
     servers = cfg.get("servers", {})
@@ -442,13 +486,14 @@ def cmd_auth():
     if updated:
         lines = [f"export {k}={v}" for k, v in existing_keys.items()]
         _write_env_block(lines)
+        _sync_zsenv_to_auth()
         print(f"\nSaved to {ZSENV_PATH}")
     else:
         print("\nNo keys entered.")
 
 
 def cmd_enable():
-    _migrate_auth_json()
+    _export_auth_to_zsenv()
 
     script_path = os.path.abspath(sys.argv[0])
     cfg_dir = os.path.dirname(CONFIG_PATH)
@@ -577,6 +622,7 @@ def cmd_enable():
             if updated:
                 lines = [f"export {k}={v}" for k, v in existing_keys.items()]
                 _write_env_block(lines)
+                _sync_zsenv_to_auth()
                 print(f"\nSaved to {ZSENV_PATH}")
             else:
                 print("  Run: refresh-models auth")

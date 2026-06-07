@@ -228,7 +228,6 @@ with open(zsenv, 'w') as f:
         f.write(l + '\n')
     f.write(f'{end}\n')
 print(f'Exported {len(lines)} key(s) from {old} to {zsenv}')
-print(f'  (kept {old} as fallback — delete manually when ready)')
 " 2>&1 || true
 }
 
