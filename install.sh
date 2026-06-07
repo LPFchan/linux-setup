@@ -58,7 +58,7 @@ prepend_block_once() {
 }
 
 configure_shell() {
-    local path_block zsh_ai_block bash_ai_block bash_profile_block
+    local path_block zsh_ai_block
 
     # Remove stale ai managed blocks so fresh ones with ai-menu path are written
     for _f in "$HOME/.zshrc" "$HOME/.bashrc"; do
@@ -98,23 +98,6 @@ if (( ${+functions[ai]} )) && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
     ai
 fi'
 
-    bash_ai_block='[[ $- == *i* && -t 0 ]] || return
-
-[[ -f "$HOME/.bashrc.d/ai-menu" ]] && source "$HOME/.bashrc.d/ai-menu"
-if declare -F ai >/dev/null && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
-    export AI_AUTO_LAUNCHED=1
-    ai
-fi'
-
-    bash_profile_block='case ":$PATH:" in
-    *":$HOME/.local/bin:"*) ;;
-    *) export PATH="$HOME/.local/bin:$PATH" ;;
-esac
-
-if [[ -f "$HOME/.bashrc" ]]; then
-    . "$HOME/.bashrc"
-fi'
-
     if has_path_setup "$HOME/.zshenv"; then
         echo "Current shell path -> $HOME/.zshenv"
     else
@@ -124,23 +107,6 @@ fi'
         echo "Current zsh ai autolaunch -> $HOME/.zshrc"
     else
         prepend_block_once "$HOME/.zshrc" zsh-ai "$zsh_ai_block"
-    fi
-
-    if has_path_setup "$HOME/.bashrc"; then
-        echo "Current shell path -> $HOME/.bashrc"
-    else
-        append_block_once "$HOME/.bashrc" path "$path_block"
-    fi
-    if has_ai_autolaunch "$HOME/.bashrc"; then
-        echo "Current bash ai autolaunch -> $HOME/.bashrc"
-    else
-        append_block_once "$HOME/.bashrc" bash-ai "$bash_ai_block"
-    fi
-
-    if [[ ! -f "$HOME/.bash_profile" && ! -f "$HOME/.bash_login" && ! -f "$HOME/.profile" ]]; then
-        append_block_once "$HOME/.bash_profile" bash-profile "$bash_profile_block"
-    else
-        echo "Current bash login profile -> existing profile"
     fi
 }
 

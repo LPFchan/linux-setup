@@ -375,14 +375,12 @@ BLOCK_DELIM=$'\x1f'
 BLOCK_REGISTRY=(
     "zshenv${BLOCK_DELIM}path${BLOCK_DELIM}path_block${BLOCK_DELIM}upsert${BLOCK_DELIM}prepend"
     "zshrc${BLOCK_DELIM}zsh-ai${BLOCK_DELIM}zsh_ai_block${BLOCK_DELIM}upsert${BLOCK_DELIM}prepend"
-    "bashrc${BLOCK_DELIM}path${BLOCK_DELIM}path_block${BLOCK_DELIM}upsert${BLOCK_DELIM}append"
-    "bashrc${BLOCK_DELIM}bash-ai${BLOCK_DELIM}bash_ai_block${BLOCK_DELIM}upsert${BLOCK_DELIM}append"
 )
 
 configure_shell() {
     _cleanup_legacy_ai_files
 
-    local path_block zsh_ai_block bash_ai_block bash_profile_block
+    local path_block zsh_ai_block
 
     path_block='case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
@@ -399,35 +397,10 @@ if (( ${+functions[ai]} )) && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
     ai
 fi'
 
-    bash_ai_block='[[ $- == *i* && -t 0 ]] || return
-
-[[ -f "$HOME/.bashrc.d/ai-menu" ]] && source "$HOME/.bashrc.d/ai-menu"
-if declare -F ai >/dev/null && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
-    export AI_AUTO_LAUNCHED=1
-    ai
-fi'
-
-    bash_profile_block='case ":$PATH:" in
-    *":$HOME/.local/bin:"*) ;;
-    *) export PATH="$HOME/.local/bin:$PATH" ;;
-esac
-
-if [[ -f "$HOME/.bashrc" ]]; then
-    . "$HOME/.bashrc"
-fi'
-
     for entry in "${BLOCK_REGISTRY[@]}"; do
         IFS="$BLOCK_DELIM" read -r file_key label content_var mode position <<< "$entry"
         manage_block "$HOME/.$file_key" "$label" "${!content_var}" "$mode" "$position"
     done
-
-    if [[ ! -f "$HOME/.bash_profile" && ! -f "$HOME/.bash_login" && ! -f "$HOME/.profile" ]]; then
-        manage_block "$HOME/.bash_profile" bash-profile "$bash_profile_block" upsert append
-    elif [[ -f "$HOME/.bash_profile" ]]; then
-        manage_block "$HOME/.bash_profile" bash-profile "$bash_profile_block" upsert append
-    else
-        echo "Current bash login profile -> existing profile"
-    fi
 }
 
 fetch_payload() {
@@ -489,8 +462,6 @@ remove_marker_blocks() {
 remove_shell_config() {
     remove_marker_blocks "$HOME/.zshenv"
     remove_marker_blocks "$HOME/.zshrc"
-    remove_marker_blocks "$HOME/.bashrc"
-    remove_marker_blocks "$HOME/.bash_profile"
 }
 
 uninstall_one() {
@@ -588,7 +559,7 @@ install_one() {
     fi
     if [[ "$module" == "ai-menu" ]]; then
         rm -f "$HOME/.bashrc.d/ai-start-menu"
-        for _f in "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.bashrc"; do
+        for _f in "$HOME/.zshrc" "$HOME/.zshenv"; do
             [[ -f "$_f" ]] && sed -i'' -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
         done
     fi
@@ -671,13 +642,6 @@ cmd_status() {
 shell_status() {
     shell_status_one "$HOME/.zshenv" path
     shell_status_one "$HOME/.zshrc" zsh-ai
-    shell_status_one "$HOME/.bashrc" path
-    shell_status_one "$HOME/.bashrc" bash-ai
-    if [[ -f "$HOME/.bash_profile" || -f "$HOME/.bash_login" || -f "$HOME/.profile" ]]; then
-        printf '%-14s %-12s target=%s\n' "bash-profile" "existing" "login profile present"
-    else
-        printf '%-14s %-12s target=%s\n' "bash-profile" "missing" "$HOME/.bash_profile"
-    fi
 }
 
 shell_status_one() {
