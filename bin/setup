@@ -190,17 +190,23 @@ end = '# END setup:api-keys'
 try:
     data = json.load(open(old))
 except Exception:
-    os.remove(old)
     exit(0)
 if not isinstance(data, dict) or not data:
-    os.remove(old)
     exit(0)
 lines = []
 for p, e in data.items():
-    if isinstance(e, dict) and e.get('key','').strip():
-        lines.append(f'export {p.upper()}_API_KEY={e[\"key\"].strip()}')
+    if not isinstance(e, dict):
+        continue
+    etype = e.get('type', '')
+    if etype == 'api':
+        key = e.get('key', '')
+        if key and isinstance(key, str) and key.strip():
+            lines.append(f'export {p.upper()}_API_KEY={key.strip()}')
+    elif etype == 'oauth':
+        access = e.get('access', '')
+        if access and isinstance(access, str):
+            lines.append(f'export {p.upper()}_OAUTH_TOKEN={access}')
 if not lines:
-    os.remove(old)
     exit(0)
 existing = []
 in_block = False
@@ -218,8 +224,8 @@ with open(zsenv, 'w') as f:
     for l in lines:
         f.write(l + '\n')
     f.write(f'{end}\n')
-os.remove(old)
-print(f'Migrated {len(lines)} API key(s) from {old} to {zsenv}')
+print(f'Exported {len(lines)} key(s) from {old} to {zsenv}')
+print(f'  (kept {old} as fallback — delete manually when ready)')
 " 2>&1 || true
 }
 

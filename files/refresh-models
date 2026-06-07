@@ -69,17 +69,24 @@ def _migrate_auth_json():
     for provider, entry in old.items():
         if not isinstance(entry, dict):
             continue
-        key = entry.get("key", "")
-        if key and isinstance(key, str) and key.strip():
-            env_name = f"{provider.upper()}_API_KEY"
-            lines.append(f"export {env_name}={key.strip()}")
+        etype = entry.get("type", "")
+        if etype == "api":
+            key = entry.get("key", "")
+            if key and isinstance(key, str) and key.strip():
+                env_name = f"{provider.upper()}_API_KEY"
+                lines.append(f"export {env_name}={key.strip()}")
+        elif etype == "oauth":
+            access = entry.get("access", "")
+            if access and isinstance(access, str):
+                env_name = f"{provider.upper()}_OAUTH_TOKEN"
+                lines.append(f"export {env_name}={access}")
 
     if not lines:
         return
 
     _write_env_block(lines)
-    os.remove(OLD_AUTH_PATH)
-    print(f"Migrated {len(lines)} API key(s) from {OLD_AUTH_PATH} to {ZSENV_PATH}")
+    print(f"Exported {len(lines)} key(s) from {OLD_AUTH_PATH} to {ZSENV_PATH}")
+    print(f"  (kept {OLD_AUTH_PATH} as fallback — delete manually when ready)")
 
 
 def _read_env_block():
@@ -102,6 +109,26 @@ def _read_env_block():
                     name, _, val = kv.partition("=")
                     keys[name] = val
     return keys
+
+
+def _fallback_auth_json(provider):
+    if not os.path.exists(OLD_AUTH_PATH):
+        return ""
+    try:
+        data = load_json(OLD_AUTH_PATH)
+    except Exception:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    entry = data.get(provider, {})
+    if not isinstance(entry, dict):
+        return ""
+    etype = entry.get("type", "")
+    if etype == "api":
+        return entry.get("key", "")
+    if etype == "oauth":
+        return entry.get("access", "")
+    return ""
 
 
 def _write_env_block(lines):
@@ -146,6 +173,8 @@ def get_auth(auth_cfg):
         if not key:
             block = _read_env_block()
             key = block.get(env_name, "")
+        if not key:
+            key = _fallback_auth_json(provider)
         if key:
             return "api_key", key
     elif atype == "api_key":
@@ -318,6 +347,8 @@ def _get_key(provider):
     if not key:
         block = _read_env_block()
         key = block.get(_env_name(provider), "")
+    if not key:
+        key = _fallback_auth_json(provider)
     return key
 
 
