@@ -749,9 +749,22 @@ cmd_enable() {
         if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
             ${cmd}
         else
-sudo -E ${cmd}
-    else
-        sudo -E ${cmd}
+            sudo -E ${cmd}
+        fi
+    done
+}
+
+cmd_disable() {
+    local modules=("$@")
+    ((${#modules[@]} == 0)) && modules=(${SERVICE_MODULES})
+    for module in "${modules[@]}"; do
+        is_service_module "$module" || { echo "Not a service module: $module" >&2; continue; }
+        local cmd; cmd=$(module_disable_cmd "$module")
+        echo "Disabling $module..."
+        if echo " ${USER_SERVICE_MODULES} " | grep -q " ${module} "; then
+            ${cmd}
+        else
+            sudo -E ${cmd}
         fi
     done
 }
@@ -1049,6 +1062,7 @@ cmd_reconfigure() {
             else
                 actions="install"$'\n'
             fi
+        fi
         actions="${actions}cancel"
 
         action=$(echo "$actions" | fzf \
