@@ -63,7 +63,8 @@ configure_shell() {
 
     # Remove stale ai managed blocks so fresh ones with ai-menu path are written
     for _f in "$HOME/.zshrc" "$HOME/.bashrc"; do
-        if [[ -f "$_f" ]] && grep -qE 'linux-setup:(zsh-ai|bash-ai)' "$_f" 2>/dev/null; then
+        [[ -f "$_f" ]] || continue
+        if grep -qE 'linux-setup:(zsh-ai|bash-ai)' "$_f" 2>/dev/null; then
             _tmp=$(mktemp)
             awk '
                 /^# >>> linux-setup:zsh-ai >>>/   { skip=1; next }
@@ -72,6 +73,10 @@ configure_shell() {
                 /^# <<< linux-setup:bash-ai <<</  { skip=0; next }
                 !skip { print }
             ' "$_f" > "$_tmp" && mv "$_tmp" "$_f"
+        fi
+        if grep -q 'ai-start-menu' "$_f" 2>/dev/null; then
+            sed -i '' -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
+            sed -i -e '/ai-start-menu/d' "$_f" 2>/dev/null || true
         fi
     done
     rm -f "$HOME/.bashrc.d/ai-start-menu"
