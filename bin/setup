@@ -574,7 +574,7 @@ install_one() {
     rm -f "$payload"
     if [[ "$module" == "setup" ]]; then
         echo "Restarting setup..."
-        exec "$target" "${ORIG_ARGS[@]}"
+        exec "$target" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
     fi
 }
 
