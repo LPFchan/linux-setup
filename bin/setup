@@ -32,6 +32,8 @@ Commands:
   disable [module...]  Disable service modules (requires sudo)
   diff [module...]     Show local diff against remote source
   doctor               Check required local tools
+  schedule             Install daily auto-update timer
+  unschedule           Remove daily auto-update timer
 
 Run without arguments for interactive fzf reconfigure.
 
@@ -772,6 +774,90 @@ cmd_doctor() {
     return "$missing"
 }
 
+AUTOUPDATE_SERVICE_UNIT="[Unit]
+Description=Daily setup update check
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/setup update
+"
+
+AUTOUPDATE_TIMER_UNIT="[Unit]
+Description=Daily setup update
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"
+
+cmd_schedule() {
+    local script_path
+    script_path="$(command -v setup 2>/dev/null || echo "$HOME/.local/bin/setup")"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        local plist_dir="$HOME/Library/LaunchAgents"
+        local plist="$plist_dir/com.lost.plus.setup-update.plist"
+        mkdir -p "$plist_dir"
+        cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lost.plus.setup-update</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$script_path</string>
+        <string>update</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key><integer>3</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/tmp/setup-update.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/setup-update.log</string>
+</dict>
+</plist>
+PLIST
+        local _uid; _uid=$(id -u)
+        launchctl bootout "gui/$_uid/com.lost.plus.setup-update" 2>/dev/null || true
+        local r; r=$(launchctl bootstrap "gui/$_uid" "$plist" 2>&1) || true
+        if echo "$r" | grep -q '125'; then
+            launchctl load "$plist" 2>/dev/null || true
+        fi
+        echo "setup auto-update scheduled daily at 03:00 (launchd)"
+    else
+        local dir="$HOME/.config/systemd/user"
+        mkdir -p "$dir"
+        echo "$AUTOUPDATE_SERVICE_UNIT" > "$dir/setup-update.service"
+        echo "$AUTOUPDATE_TIMER_UNIT" > "$dir/setup-update.timer"
+        systemctl --user daemon-reload
+        systemctl --user enable --now setup-update.timer
+        echo "setup auto-update scheduled daily (systemd)"
+    fi
+}
+
+cmd_unschedule() {
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        local plist="$HOME/Library/LaunchAgents/com.lost.plus.setup-update.plist"
+        local _uid; _uid=$(id -u)
+        launchctl bootout "gui/$_uid/com.lost.plus.setup-update" 2>/dev/null || true
+        rm -f "$plist"
+        echo "setup auto-update unscheduled"
+    else
+        systemctl --user disable --now setup-update.timer 2>/dev/null || true
+        rm -f "$HOME/.config/systemd/user/setup-update.service" \
+              "$HOME/.config/systemd/user/setup-update.timer"
+        systemctl --user daemon-reload
+        echo "setup auto-update unscheduled"
+    fi
+}
+
 # --- fzf interactive reconfigure ------------------------------------
 
 detect_env_summary() {
@@ -1064,5 +1150,7 @@ case "$cmd" in
     disable) cmd_disable "$@" ;;
     diff) cmd_diff "$@" ;;
     doctor) cmd_doctor ;;
+    schedule) cmd_schedule "$@" ;;
+    unschedule) cmd_unschedule "$@" ;;
     *) usage >&2; exit 1 ;;
 esac
