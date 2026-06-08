@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# setup-module: starship
+# setup-type: script
+
+[[ "$(type -t git_clone_if_missing)" == "function" ]] || source "$(dirname "${BASH_SOURCE[0]}")/../lib/script-helpers.sh"
+
+MODULE="starship"
+BIN="$HOME/.local/bin/starship"
+
+BLOCK_CONTENT='if command -v starship >/dev/null; then
+    _STARSHIP_CACHE="$HOME/.cache/starship-init.zsh"
+    if [[ -f "$_STARSHIP_CACHE" ]]; then
+        source "$_STARSHIP_CACHE"
+    else
+        mkdir -p "$HOME/.cache" 2>/dev/null
+        starship init zsh > "$_STARSHIP_CACHE" 2>/dev/null && source "$_STARSHIP_CACHE"
+    fi
+fi'
+
+install() {
+    if command -v starship >/dev/null 2>&1; then
+        echo "starship already installed: $(starship --version | head -1)"
+    else
+        curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin"
+    fi
+    _upsert_block
+    _record_state
+}
+
+status() {
+    if ! command -v starship >/dev/null 2>&1; then
+        printf '%-20s %-12s\n' "$MODULE" "uninstalled"
+        return 2
+    fi
+    local installed_ver latest_ver
+    installed_ver=$(starship --version 2>/dev/null | awk 'NR==1{print $2}')
+    latest_ver=$(curl -fsSL "https://api.github.com/repos/starship/starship/releases/latest" \
+        2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/' || true)
+    if [[ -z "$latest_ver" ]]; then
+        printf '%-20s %-12s version=%s (could not check latest)\n' "$MODULE" "installed" "$installed_ver"
+        record_script_state "$MODULE" "version" "$installed_ver" "$installed_ver"
+        return 0
+    fi
+    if [[ "$installed_ver" == "$latest_ver" ]]; then
+        printf '%-20s %-12s version=%s\n' "$MODULE" "current" "$installed_ver"
+        record_script_state "$MODULE" "version" "$installed_ver" "$latest_ver"
+        return 0
+    else
+        printf '%-20s %-12s installed=%s latest=%s\n' "$MODULE" "outdated" "$installed_ver" "$latest_ver"
+        record_script_state "$MODULE" "version" "$installed_ver" "$latest_ver"
+        return 1
+    fi
+}
+
+update() {
+    curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin"
+    _upsert_block
+    _record_state
+}
+
+uninstall() {
+    rm -f "$BIN"
+    manage_block "$HOME/.zshrc" "starship" "" "remove"
+    remove_script_state "$MODULE"
+}
+
+_upsert_block() {
+    manage_block "$HOME/.zshrc" "starship" "$BLOCK_CONTENT" "upsert" "append"
+}
+
+_record_state() {
+    if command -v starship >/dev/null 2>&1; then
+        local ver
+        ver=$(starship --version 2>/dev/null | awk 'NR==1{print $2}')
+        record_script_state "$MODULE" "version" "${ver:-unknown}" "${ver:-unknown}"
+    fi
+}

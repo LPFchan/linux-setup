@@ -9,11 +9,21 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/setup"
 MANIFEST_URL="$SOURCE_URL/manifest.tsv"
 MANIFEST_FILE="$STATE_DIR/manifest.tsv"
 HASH_FILE="$STATE_DIR/installed.tsv"
+SCRIPT_HELPERS_FILE="$STATE_DIR/lib/script-helpers.sh"
 FORCE=0
 
 SERVICE_MODULES="kernel-simmer service-ctl gpu-fancontrol monitoring refresh-models backup"
 USER_SERVICE_MODULES="refresh-models"
 BATCH=0
+
+fetch_script_helpers() {
+    mkdir -p "$(dirname "$SCRIPT_HELPERS_FILE")"
+    curl -fsSL "$SOURCE_URL/lib/script-helpers.sh" -o "$SCRIPT_HELPERS_FILE" 2>/dev/null \
+        || echo "Warning: could not fetch lib/script-helpers.sh" >&2
+    # shellcheck disable=SC1090
+    [[ -f "$SCRIPT_HELPERS_FILE" ]] && source "$SCRIPT_HELPERS_FILE"
+}
+fetch_script_helpers
 
 usage() {
     cat <<'EOF'
@@ -391,6 +401,8 @@ esac'
 [[ -n ${TERM_PROGRAM-} || -n ${SSH_TTY-} ]] || return
 (( SHLVL > 1 )) && return
 
+alias /exit='"'"'exit'"'"'
+
 [[ -f "$HOME/.bashrc.d/ai-menu" ]] && source "$HOME/.bashrc.d/ai-menu"
 if (( ${+functions[ai]} )) && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
     export AI_AUTO_LAUNCHED=1
@@ -411,6 +423,67 @@ fetch_payload() {
     fi
     echo "Failed to fetch $source from $SOURCE_URL" >&2
     return 1
+}
+
+_script_install() {
+    local module="$1" target="$2" source="$3"
+    local payload
+    payload=$(mktemp)
+    if ! fetch_payload "$source" "$payload"; then
+        rm -f "$payload"
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    source "$payload"
+    install
+    local rc=$?
+    rm -f "$payload"
+    return $rc
+}
+
+_script_status() {
+    local module="$1" target="$2" source="$3"
+    local payload
+    payload=$(mktemp)
+    if ! fetch_payload "$source" "$payload"; then
+        rm -f "$payload"
+        return 1
+    fi
+    source "$payload"
+    status
+    local rc=$?
+    rm -f "$payload"
+    return $rc
+}
+
+_script_uninstall() {
+    local module="$1" target="$2" source="$3"
+    local payload
+    payload=$(mktemp)
+    if ! fetch_payload "$source" "$payload"; then
+        rm -f "$payload"
+        return 1
+    fi
+    source "$payload"
+    uninstall
+    local rc=$?
+    rm -f "$payload"
+    return $rc
+}
+
+_script_update() {
+    local module="$1" target="$2" source="$3"
+    local payload
+    payload=$(mktemp)
+    if ! fetch_payload "$source" "$payload"; then
+        rm -f "$payload"
+        return 1
+    fi
+    source "$payload"
+    update
+    local rc=$?
+    rm -f "$payload"
+    return $rc
 }
 
 record_hash() {
@@ -466,6 +539,9 @@ remove_shell_config() {
 
 uninstall_one() {
     local module="$1" target_spec="$2" mode="$3" source="$4"
+
+    [[ "$mode" == "script" ]] && { _script_uninstall "$module" "$target_spec" "$source"; return; }
+
     local target old_hash current_hash local_module
     target=$(expand_path "$target_spec")
     old_hash=$(installed_hash_for "$target" || true)
@@ -497,6 +573,9 @@ uninstall_one() {
 
 install_one() {
     local module="$1" target_spec="$2" mode="$3" source="$4"
+
+    [[ "$mode" == "script" ]] && { _script_install "$module" "$target_spec" "$source"; return; }
+
     local target dir payload old_hash current_hash new_hash install_target remote_module remote_hash
 
     target=$(expand_path "$target_spec")
@@ -575,6 +654,9 @@ install_one() {
 
 status_one() {
     local module="$1" target_spec="$2" mode="$3" source="$4"
+
+    [[ "$mode" == "script" ]] && { _script_status "$module" "$target_spec" "$source"; return; }
+
     local target payload remote_hash local_hash local_module old_hash current_hash state extra
     target=$(expand_path "$target_spec")
     remote_hash=$(remote_checksum "$source")
@@ -697,17 +779,27 @@ cmd_update() {
         fi
         local target_path local_hash
         target_path=$(expand_path "$target")
-        local_hash=$(installed_hash_for "$target_path" || true)
-        if [[ "$module" == "setup" ]]; then
-            setup_target="$target"; setup_mode="$mode"; setup_source="$source"
-            setup_local_hash="$local_hash"
-            continue
-        fi
-        if [[ -z "$local_hash" ]]; then
-            new_count=$((new_count + 1))
-            new_names+=("$module")
+        if [[ "$mode" == "script" ]]; then
+            local _ss; _ss=$(script_state_for "$module" || true)
+            if [[ -z "$_ss" ]]; then
+                new_count=$((new_count + 1))
+                new_names+=("$module")
+            else
+                _script_update "$module" "$target" "$source"
+            fi
         else
-            install_one "$module" "$target" "$mode" "$source"
+            local_hash=$(installed_hash_for "$target_path" || true)
+            if [[ "$module" == "setup" ]]; then
+                setup_target="$target"; setup_mode="$mode"; setup_source="$source"
+                setup_local_hash="$local_hash"
+                continue
+            fi
+            if [[ -z "$local_hash" ]]; then
+                new_count=$((new_count + 1))
+                new_names+=("$module")
+            else
+                install_one "$module" "$target" "$mode" "$source"
+            fi
         fi
     done < "$MANIFEST_FILE"
     # Update setup last — self-update exec restarts the process
@@ -758,6 +850,7 @@ cmd_diff() {
     while IFS=$'\t' read -r module target mode source; do
         [[ -z "${module:-}" || "$module" == \#* ]] && continue
         module_selected "$module" "$@" || continue
+        [[ "$mode" == "script" ]] && continue
         found=1
         local_path=$(expand_path "$target")
         payload=$(mktemp)
@@ -804,7 +897,7 @@ cmd_disable() {
 
 cmd_doctor() {
     local missing=0 tool
-    for tool in awk cat curl cut diff dirname grep install mktemp mv rm rmdir; do
+    for tool in awk cat curl diff dirname git grep install mktemp mv rm rmdir; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             echo "missing: $tool"
             missing=1
@@ -942,6 +1035,37 @@ cmd_reconfigure() {
             local target local_hash remote_hash \
                    svc_label local_label remote_label status_label
 
+            # Script modules use script-state.tsv instead of installed.tsv/checksums.tsv
+            if [[ "$mo" == "script" ]]; then
+                target=$(expand_path "$t")
+                local _ss; _ss=$(script_state_for "$m" || true)
+                local _lr="" _rr="" _rt=""
+                if [[ -n "$_ss" ]]; then
+                    IFS=$'\t' read -r _rt _lr _rr <<< "$_ss"
+                fi
+                local_label="${_lr:0:7}"; [[ -z "$_lr" ]] && local_label="-"
+                if [[ -z "$_lr" ]]; then
+                    remote_label="-"
+                    status_label="not installed"
+                elif [[ "$_rt" == "version" ]]; then
+                    remote_label="$_rr"
+                    if [[ "$_lr" == "$_rr" ]]; then
+                        status_label="up-to-date"
+                    else
+                        status_label="update available"
+                    fi
+                else
+                    remote_label="${_rr:0:7}"
+                    if [[ "$_lr" == "$_rr" ]]; then
+                        status_label="up-to-date"
+                    else
+                        status_label="update available"
+                    fi
+                fi
+                non_svc+=("$m|${local_label}|script|${remote_label}|${status_label}")
+                continue
+            fi
+
             target=$(expand_path "$t")
             local_hash=$(installed_hash_for "$target" || true)
             remote_hash=$(remote_checksum "$s")
@@ -1028,12 +1152,16 @@ cmd_reconfigure() {
                     [[ "$confirm" == "yes" ]] || continue
                     while IFS=$'\t' read -r m t mo s; do
                         [[ -z "${m:-}" || "$m" == \#* ]] && continue
-                        if [[ "$m" == "setup" ]]; then
+                        if [[ "$mo" == "script" ]]; then
+                            local _ss; _ss=$(script_state_for "$m" || true)
+                            [[ -n "$_ss" ]] && _script_update "$m" "$t" "$s"
+                        elif [[ "$m" == "setup" ]]; then
                             setup_entry="$t"$'\t'"$mo"$'\t'"$s"
                             continue
+                        else
+                            local_hash=$(installed_hash_for "$(expand_path "$t")" || true)
+                            [[ -n "$local_hash" ]] && install_one "$m" "$t" "$mo" "$s"
                         fi
-                        local_hash=$(installed_hash_for "$(expand_path "$t")" || true)
-                        [[ -n "$local_hash" ]] && install_one "$m" "$t" "$mo" "$s"
                     done < "$MANIFEST_FILE"
                     if [[ -n "${setup_entry:-}" ]]; then
                         IFS=$'\t' read -r st smo ss <<< "$setup_entry"
@@ -1087,14 +1215,18 @@ cmd_reconfigure() {
         [[ -z "$target" ]] && continue
 
         # Use cached values for state detection
-        got_local_hash=$(installed_hash_for "$(expand_path "$target")" || true)
         has_svc=0
-        is_service_module "$mod" && has_svc=1
         local file_installed=0 svc_active=0
-        if [[ -n "$got_local_hash" ]] || [[ -f "$(expand_path "$target")" ]]; then
-            file_installed=1
+        if [[ "$mode" == "script" ]]; then
+            file_installed=$(is_script_installed "$mod" && echo 1 || echo 0)
+        else
+            got_local_hash=$(installed_hash_for "$(expand_path "$target")" || true)
+            is_service_module "$mod" && has_svc=1
+            if [[ -n "$got_local_hash" ]] || [[ -f "$(expand_path "$target")" ]]; then
+                file_installed=1
+            fi
+            (( has_svc && file_installed )) && module_is_active "$mod" && svc_active=1
         fi
-        (( has_svc && file_installed )) && module_is_active "$mod" && svc_active=1
 
         actions=""
         if (( file_installed )); then

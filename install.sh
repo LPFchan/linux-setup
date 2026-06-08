@@ -92,6 +92,8 @@ esac'
 [[ -n ${TERM_PROGRAM-} || -n ${SSH_TTY-} ]] || return
 (( SHLVL > 1 )) && return
 
+alias /exit='"'"'exit'"'"'
+
 [[ -f "$HOME/.bashrc.d/ai-menu" ]] && source "$HOME/.bashrc.d/ai-menu"
 if (( ${+functions[ai]} )) && [[ -z "${AI_AUTO_LAUNCHED:-}" ]]; then
     export AI_AUTO_LAUNCHED=1
