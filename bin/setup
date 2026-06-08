@@ -1062,7 +1062,7 @@ cmd_reconfigure() {
                         status_label="update available"
                     fi
                 fi
-                non_svc+=("$m|${local_label}|script|${remote_label}|${status_label}")
+                non_svc+=("$m|${local_label}|$([ -n "$_lr" ] && echo installed || echo uninstalled)|${remote_label}|${status_label}")
                 continue
             fi
 
