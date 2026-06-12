@@ -605,45 +605,65 @@ install_one() {
     fi
 }
 
+file_status_fields() {
+    local module="$1" target_spec="$2" source="$3"
+    local target remote_hash remote_label recorded_hash current_hash local_module \
+          state status_label local_label installed extra
+
+    target=$(expand_path "$target_spec")
+    remote_hash=$(remote_checksum "$source" || true)
+    [[ -n "$remote_hash" ]] && remote_label="${remote_hash:0:7}" || remote_label="-"
+
+    if [[ ! -f "$target" ]]; then
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$target" "uninstalled" "not installed" "-" "$remote_label" "0" "remote=$remote_label"
+        return 0
+    fi
+
+    installed=1
+    current_hash=$(sha256 "$target")
+    local_label="${current_hash:0:7}"
+    local_module=$(module_for "$target" || true)
+    recorded_hash=$(installed_hash_for "$target" || true)
+
+    if [[ "$local_module" != "$module" ]]; then
+        state="foreign"
+        status_label="foreign"
+        extra="current=${current_hash:0:7} remote=$remote_label"
+    elif [[ -z "$recorded_hash" ]]; then
+        state="untracked"
+        status_label="installed (untracked)"
+        extra="current=${current_hash:0:7} remote=$remote_label untracked-hash"
+    elif [[ "$current_hash" != "$recorded_hash" ]]; then
+        state="modified"
+        status_label="modified"
+        extra="recorded=${recorded_hash:0:7} current=${current_hash:0:7} remote=$remote_label"
+    elif [[ -z "$remote_hash" ]]; then
+        state="unknown"
+        status_label="remote unknown"
+        extra="local=${recorded_hash:0:7} remote=-"
+    elif [[ "$recorded_hash" != "$remote_hash" ]]; then
+        state="outdated"
+        status_label="update available"
+        extra="local=${recorded_hash:0:7} remote=${remote_hash:0:7}"
+    else
+        state="current"
+        status_label="up-to-date"
+        extra="local=${recorded_hash:0:7} remote=${remote_hash:0:7}"
+    fi
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$target" "$state" "$status_label" "$local_label" "$remote_label" "$installed" "$extra"
+}
+
 status_one() {
     local module="$1" target_spec="$2" mode="$3" source="$4"
 
     [[ "$mode" == "script" ]] && { _script_status "$module" "$target_spec" "$source"; return; }
 
-    local target payload remote_hash local_hash local_module old_hash current_hash state extra
-    target=$(expand_path "$target_spec")
-    remote_hash=$(remote_checksum "$source")
-
-    if [[ ! -f "$target" ]]; then
-        printf '%-25s %-12s remote=%s target=%s\n' "$module" "uninstalled" "${remote_hash:0:7}" "$target"
-        return 0
-    fi
-
-    local_module=$(module_for "$target" || true)
-    old_hash=$(installed_hash_for "$target" || true)
-
-    if [[ "$local_module" != "$module" ]]; then
-        printf '%-25s %-12s target=%s\n' "$module" "foreign" "$target"
-        return 0
-    fi
-
-    state="current"
-    extra="local=${old_hash:0:7} remote=${remote_hash:0:7}"
-
-    if [[ -n "$old_hash" ]]; then
-        current_hash=$(sha256 "$target")
-        if [[ "$current_hash" != "$old_hash" ]]; then
-            state="modified"
-        fi
-    else
-        extra="$extra untracked-hash"
-    fi
-
-    if [[ "$state" != "modified" ]]; then
-        if [[ -n "$old_hash" && "$old_hash" != "$remote_hash" ]]; then
-            state="outdated"
-        fi
-    fi
+    local target state status_label local_label remote_label installed extra
+    IFS=$'\t' read -r target state status_label local_label remote_label installed extra \
+        < <(file_status_fields "$module" "$target_spec" "$source")
 
     printf '%-25s %-12s %s target=%s\n' "$module" "$state" "$extra" "$target"
 }
@@ -984,7 +1004,7 @@ cmd_reconfigure() {
 
         while IFS=$'\t' read -r m t mo s; do
             [[ -z "${m:-}" || "$m" == \#* ]] && continue
-            local target local_hash remote_hash \
+            local target state file_installed extra \
                    svc_label local_label remote_label status_label
 
             # Script modules use script-state.tsv instead of installed.tsv/checksums.tsv
@@ -1018,41 +1038,21 @@ cmd_reconfigure() {
                 continue
             fi
 
-            target=$(expand_path "$t")
-            local_hash=$(installed_hash_for "$target" || true)
-            remote_hash=$(remote_checksum "$s")
-            [[ -z "$remote_hash" ]] && remote_hash="-"
-
-            if [[ -z "$local_hash" || "$local_hash" == "-" ]]; then
-                if [[ -f "$target" ]]; then
-                    local_label="${local_hash:0:7}"
-                    status_label="installed (untracked)"
-                else
-                    local_label="-"
-                    status_label="not installed"
-                fi
-            elif [[ "$local_hash" != "$remote_hash" ]]; then
-                local_label="${local_hash:0:7}"
-                status_label="update available"
-            else
-                local_label="${local_hash:0:7}"
-                status_label="up-to-date"
-            fi
-
-            [[ -z "$remote_hash" || "$remote_hash" == "-" ]] && remote_label="-" || remote_label="${remote_hash:0:7}"
+            IFS=$'\t' read -r target state status_label local_label remote_label file_installed extra \
+                < <(file_status_fields "$m" "$t" "$s")
 
             if is_service_module "$m"; then
                 local unit; unit=$(module_service_unit "$m")
                 if [[ "$unit" == "tool" ]]; then
-                    svc_label=$([[ -f "$target" ]] && echo "installed" || echo "uninstalled")
-                elif module_is_active "$m"; then
+                    svc_label=$([[ "$file_installed" == "1" ]] && echo "installed" || echo "uninstalled")
+                elif [[ "$file_installed" == "1" ]] && module_is_active "$m"; then
                     svc_label="active"
                 else
                     svc_label="inactive"
                 fi
                 svc+=("$m|${local_label}|${svc_label}|${remote_label}|${status_label}")
             else
-                if [[ (-n "$local_hash" && "$local_hash" != "-") || -f "$target" ]]; then
+                if [[ "$file_installed" == "1" ]]; then
                     svc_label="installed"
                 else
                     svc_label="uninstalled"
